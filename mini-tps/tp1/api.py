@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 import pandas as pd
 
 # --- CARGA DE MODELO ---
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent
 CONTENIDO_JOBLIB = joblib.load(BASE_DIR / "modelo" / "modelo.joblib")
 
 pipeline = CONTENIDO_JOBLIB["pipeline"]

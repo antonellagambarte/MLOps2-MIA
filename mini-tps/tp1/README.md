@@ -10,7 +10,7 @@ El umbral de decisión es 0.4 en vez del 0.5 por defecto.
 ## Cómo correrlo
 
 El entorno se arma una sola vez desde la raíz del repo (ver README de ahí).
-Después, parado en `TP1/`:
+Después, parado en `mini-tps/tp1/`:
 
 ```bash
 uv run uvicorn api:app --reload --port 8080
@@ -19,7 +19,7 @@ uv run uvicorn api:app --reload --port 8080
 Ese comando no termina: el servidor se queda corriendo y ocupa la terminal.
 La documentación interactiva queda en http://localhost:8080/docs
 
-Para probarlo hay que abrir una segunda terminal, también parado en `TP1/`:
+Para probarlo hay que abrir una segunda terminal, también parado en `mini-tps/tp1/`:
 
 ```bash
 uv run python cliente_prueba.py
