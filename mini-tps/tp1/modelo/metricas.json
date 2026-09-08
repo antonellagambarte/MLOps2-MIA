@@ -1,0 +1,12 @@
+{
+  "nombre": "predictor_acv",
+  "version": "1.0.0",
+  "umbral": 0.4,
+  "metricas": {
+    "accuracy": 0.7949,
+    "precision": 0.1651,
+    "recall": 0.7912,
+    "f1_score": 0.2732,
+    "roc_auc": 0.8642
+  }
+}

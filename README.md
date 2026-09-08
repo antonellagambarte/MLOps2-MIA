@@ -11,9 +11,10 @@ uv pip install -r requirements.txt
 
 ## Estructura del repo
 
-- `mini-tps/` — resolución individual de cada mini-TP semanal (uno por sesión).
-- `integrador/` — trabajo integrador (arquitectura Airflow + MLflow + FastAPI + MinIO/S3 sobre Docker), armado de a partes a medida que se van resolviendo los mini-tps.
+- `mini-tps/` — resolución de cada mini-TP semanal (uno por sesión).
+- `integrador/` — trabajo integrador.
 
 ## Contenido
 
 - [Mini-TP 1](mini-tps/tp1/README.md) — API REST con FastAPI
+- [Mini-TP 2](mini-tps/tp2/README.md) — Metadatos del modelo por GraphQL, comparado con REST

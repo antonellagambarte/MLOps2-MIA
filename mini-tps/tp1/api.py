@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import joblib
 from fastapi import FastAPI, APIRouter, HTTPException
@@ -13,6 +14,8 @@ CONTENIDO_JOBLIB = joblib.load(BASE_DIR / "modelo" / "modelo.joblib")
 pipeline = CONTENIDO_JOBLIB["pipeline"]
 VERSION_MODELO = CONTENIDO_JOBLIB["version"]
 UMBRAL = CONTENIDO_JOBLIB["umbral"]
+FEATURES = CONTENIDO_JOBLIB["features"]
+METRICAS_PATH = BASE_DIR / "modelo" / "metricas.json"
 
 app = FastAPI(title="Predictor de accidente cerebrovascular")
 
@@ -71,8 +74,45 @@ class Prediccion(BaseModel):
     descripcion: str
 
 
+# --- METADATA DEL MODELO (para la comparación con GraphQL del mini-TP2) ---
+class MetricasModelo(BaseModel):
+    accuracy: float
+    precision: float
+    recall: float
+    f1_score: float
+    roc_auc: float
+
+
+class InfoModelo(BaseModel):
+    nombre: str
+    version: str
+    umbral: float
+    features: list[str]
+
+
 # --- ENRUTAMIENTO VERSIONADO ---
 router_v1 = APIRouter(prefix="/v1", tags=["Modelo 1"])
+
+# --- ENDPOINTS DE MODELO ---
+# Dos endpoints: info_modelo devuelve los datos del modelo y metricas_modelo sus métricas (para mini-TP2).
+
+@router_v1.get("/model", response_model=InfoModelo)
+def info_modelo():
+
+    # --- PARA TOMAR DATOS DEL ARCHIVO DE MÉTRICAS ---
+    datos = json.loads(METRICAS_PATH.read_text(encoding="utf-8"))
+    return InfoModelo(
+        nombre=datos["nombre"],
+        version=datos["version"],
+        umbral=datos["umbral"],
+        features=FEATURES,
+    )
+
+
+@router_v1.get("/model/metrics", response_model=MetricasModelo)
+def metricas_modelo():
+    datos = json.loads(METRICAS_PATH.read_text(encoding="utf-8"))
+    return MetricasModelo(**datos["metricas"])
 
 
 @router_v1.post("/predict", response_model=Prediccion)

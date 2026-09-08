@@ -43,6 +43,10 @@ campos fuera de rango, que devuelve 422 con el detalle de qué falló.
 }
 ```
 
+`GET /v1/model` — datos del modelo: nombre, versión, umbral y features.
+
+`GET /v1/model/metrics` — métricas del modelo: accuracy, precision, recall, f1_score y roc_auc.
+
 ## Datos de entrada
 
 Son las 10 variables del dataset original:
