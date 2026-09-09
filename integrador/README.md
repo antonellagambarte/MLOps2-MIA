@@ -6,17 +6,61 @@ desarrollado en Aprendizaje de Máquina I (XGBoost sobre el
 
 Nivel contenedores: todo corre sobre Docker.
 
-## Estado
+## Arquitectura
 
-Infraestructura base andando. Falta Airflow y la API.
+```mermaid
+flowchart TB
+    cliente(["Cliente"])
+
+    subgraph servicios["Servicios"]
+        direction LR
+        airflow["<b>Airflow</b> · LocalExecutor<br/>DAG de ETL · DAG de entrenamiento"]
+        api["<b>FastAPI</b><br/>REST /v1/predict · GraphQL"]
+    end
+
+    mlflow["<b>MLflow</b><br/>Tracking + Model Registry · alias champion"]
+
+    subgraph almacenamiento["Almacenamiento"]
+        direction LR
+        pg[("<b>PostgreSQL</b><br/>metadata de airflow y mlflow")]
+        minio[("<b>MinIO</b> · S3<br/>datasets y artefactos")]
+    end
+
+    cliente -->|"HTTP"| api
+    airflow -->|"entrena y registra"| mlflow
+    api -->|"pide el champion"| mlflow
+    airflow --> almacenamiento
+    mlflow --> almacenamiento
+    api -.->|"baja el modelo"| minio
+
+    classDef pendiente stroke-dasharray:6 4
+    class api pendiente
+```
+
+Se lee de arriba hacia abajo: quien hace el trabajo arriba, quién sabe dónde está
+cada modelo en el medio, y dónde queda guardado abajo. La división que ordena todo
+el diseño es esa última capa: **PostgreSQL guarda metadata, MinIO guarda archivos.**
+
+FastAPI tiene el borde punteado porque todavía no está implementada. Y su flecha
+punteada hacia MinIO es la parte que sorprende: MLflow no le entrega el modelo, le
+entrega su dirección en S3, y la API lo baja de MinIO por su cuenta — por eso
+necesita credenciales de los dos.
+
+## Estado
 
 | Servicio | Rol | Estado |
 | --- | --- | --- |
 | PostgreSQL | metadata de MLflow y de Airflow, en dos bases separadas | ✅ |
 | MinIO | Data Lake S3: datos y artefactos | ✅ |
 | MLflow | tracking de experimentos y registro de modelos | ✅ |
-| Airflow | orquestación del ETL y del reentrenamiento | pendiente |
+| Airflow | orquestación (levantado, todavía sin DAGs) | ✅ |
 | FastAPI | serving del modelo (REST + GraphQL) | pendiente |
+
+El modelo del mini-TP 1 ya está registrado en MLflow como `predictor_acv`
+versión 1, con alias `champion`, mediante
+[`scripts/registrar_modelo_inicial.py`](scripts/registrar_modelo_inicial.py).
+Es provisorio: cuando exista el DAG de entrenamiento, el modelo va a entrar
+entrenándose dentro de la plataforma y ese script se borra.
 
 ## Cómo levantarlo
 
