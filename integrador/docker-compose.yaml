@@ -1,0 +1,99 @@
+services:
+  # Metadata de la plataforma: MLflow (experimentos, runs, registro de modelos)
+  # y Airflow (DAGs, task instances, conexiones) en dos bases lógicas separadas.
+  postgres:
+    image: postgres:16-alpine
+    container_name: integrador_postgres
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      # Afuera 5433 para no chocar con un Postgres instalado en la máquina.
+      # Los demás servicios le hablan por postgres:5432, dentro de la red de compose.
+      - "${POSTGRES_HOST_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Se ejecuta solo en la primera inicialización, con el volumen vacío.
+      - ./dockerfiles/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Data Lake S3: los datos (crudos y procesados) y los artefactos de MLflow
+  # (modelos serializados, gráficos).
+  minio:
+    image: minio/minio:latest
+    container_name: integrador_minio
+    restart: unless-stopped
+    env_file: .env
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "${MINIO_API_PORT}:9000"      # API S3: la que usan MLflow, los DAGs y la API
+      - "${MINIO_CONSOLE_PORT}:9001"  # consola web, solo para mirar
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Contenedor de un solo uso: crea los buckets y termina. No queda corriendo.
+  minio-init:
+    image: minio/mc:latest
+    container_name: integrador_minio_init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/${MINIO_DATA_BUCKET} &&
+      mc mb --ignore-existing local/${MINIO_MLFLOW_BUCKET} &&
+      echo 'buckets listos';
+      "
+
+  # Tracking (qué se entrenó y con qué resultado) + Model Registry (qué versión
+  # va a producción). La metadata la escribe en Postgres y los artefactos en MinIO.
+  mlflow:
+    build: ./dockerfiles/mlflow
+    image: integrador/mlflow:local
+    container_name: integrador_mlflow
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Credenciales de MinIO, con los nombres que esperan boto3 y mlflow (hablan S3)
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/mlflow
+      --default-artifact-root s3://${MINIO_MLFLOW_BUCKET}/
+    ports:
+      - "${MLFLOW_HOST_PORT}:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  postgres_data:
+  minio_data:
