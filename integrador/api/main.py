@@ -7,6 +7,9 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from mlflow.models import Model
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, Field
+from strawberry.fastapi import GraphQLRouter
+
+from esquema_graphql import schema as schema_graphql
 
 NOMBRE_MODELO = os.getenv("NOMBRE_MODELO", "predictor_acv")
 ALIAS_MODELO = os.getenv("ALIAS_MODELO", "champion")
@@ -179,3 +182,5 @@ def predecir(paciente: Caracteristicas):
 
 
 app.include_router(router_v1)
+
+app.include_router(GraphQLRouter(schema_graphql), prefix="/graphql")
