@@ -108,6 +108,7 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow:5000,localhost:5000,127.0.0.1:5000"
     command: >
       mlflow server
       --host 0.0.0.0
@@ -184,7 +185,6 @@ services:
       start_period: 30s
 
   # Lee los archivos de airflow/dags/ y los convierte en DAGs registrados.
-  # En Airflow 3 esto ya no lo hace el scheduler, es un proceso aparte.
   airflow-dag-processor:
     <<: *airflow-common
     container_name: integrador_airflow_dag_processor
@@ -196,6 +196,34 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # Sirve el modelo. Le pide el champion a MLflow y baja el artefacto de MinIO.
+  fastapi:
+    build:
+      context: .
+      dockerfile: dockerfiles/fastapi/Dockerfile
+    image: integrador/fastapi:local
+    container_name: integrador_fastapi
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      NOMBRE_MODELO: predictor_acv
+      ALIAS_MODELO: champion
+    ports:
+      - "${API_HOST_PORT}:8800"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8800/health"]
       interval: 15s
       timeout: 10s
       retries: 10
