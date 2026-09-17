@@ -1,0 +1,73 @@
+syntax = "proto3";
+package scoring;
+
+enum Genero {
+  GENERO_NO_ESPECIFICADO = 0;
+  GENERO_MALE = 1;
+  GENERO_FEMALE = 2;
+  GENERO_OTHER = 3;
+}
+
+enum EstadoCivil {
+  ESTADO_CIVIL_NO_ESPECIFICADO = 0;
+  ESTADO_CIVIL_YES = 1;
+  ESTADO_CIVIL_NO = 2;
+}
+
+enum TipoTrabajo {
+  TIPO_TRABAJO_NO_ESPECIFICADO = 0;
+  TIPO_TRABAJO_PRIVATE = 1;
+  TIPO_TRABAJO_SELF_EMPLOYED = 2;
+  TIPO_TRABAJO_GOVT_JOB = 3;
+  TIPO_TRABAJO_CHILDREN = 4;
+  TIPO_TRABAJO_NEVER_WORKED = 5;
+}
+
+enum TipoResidencia {
+  TIPO_RESIDENCIA_NO_ESPECIFICADO = 0;
+  TIPO_RESIDENCIA_URBAN = 1;
+  TIPO_RESIDENCIA_RURAL = 2;
+}
+
+enum EstadoTabaquismo {
+  TABAQUISMO_NO_ESPECIFICADO = 0;
+  TABAQUISMO_FORMERLY_SMOKED = 1;
+  TABAQUISMO_NEVER_SMOKED = 2;
+  TABAQUISMO_SMOKES = 3;
+  TABAQUISMO_UNKNOWN = 4;
+}
+
+// --- Entrada: un paciente
+
+message Caracteristicas {
+  Genero gender = 1;
+  double age = 2;
+  int32 hypertension = 3;
+  int32 heart_disease = 4;
+  EstadoCivil ever_married = 5;
+  TipoTrabajo work_type = 6;
+  TipoResidencia Residence_type = 7;
+  double avg_glucose_level = 8;
+  optional double bmi = 9;
+  EstadoTabaquismo smoking_status = 10;
+}
+
+// --- Entrada del server-streaming
+// Lote
+message LoteCaracteristicas {
+  repeated Caracteristicas casos = 1;
+}
+
+// --- Salida
+
+message Prediccion {
+  int32 prediccion = 1;
+  double probabilidad = 2;
+  string version_modelo = 3;
+  string descripcion = 4;
+}
+
+service Scoring {
+  rpc Predecir(Caracteristicas) returns (Prediccion);              // unary: 1 -> 1
+  rpc PredecirLote(LoteCaracteristicas) returns (stream Prediccion); // server streaming: 1 -> N
+}
