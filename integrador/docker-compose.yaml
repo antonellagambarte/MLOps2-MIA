@@ -214,6 +214,28 @@ services:
       retries: 10
       start_period: 30s
 
+  grpc:
+    build:
+      context: .
+      dockerfile: dockerfiles/grpc/Dockerfile
+    image: integrador/grpc:local
+    container_name: integrador_grpc
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      AWS_ENDPOINT_URL_S3: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      NOMBRE_MODELO: predictor_acv
+      ALIAS_MODELO: champion
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "${GRPC_HOST_PORT}:50051"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   minio_data:
