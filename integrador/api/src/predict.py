@@ -39,6 +39,7 @@ def run(features_dict, data_dict, model, umbral, debug=False):
         drop_first=True,
         dtype=int,
     )
+    features_df.columns = features_df.columns.str.replace(" ", "_", regex=False)
 
     if debug:
         print("\n--- 2. Después de get_dummies ---")

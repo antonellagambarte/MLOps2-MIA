@@ -54,7 +54,11 @@ def entrenar_acv():
     def entrenar_y_registrar():
         import logging
 
+        import io
+
         import awswrangler as wr
+        import boto3
+        import joblib
         import mlflow
         from mlflow.entities import ViewType
         from mlflow.exceptions import RestException
@@ -69,11 +73,11 @@ def entrenar_acv():
         log = logging.getLogger("airflow.task")
 
         def _entrenar():
-            final = f"{consts.S3}{consts.BUCKET_FINAL}"
-            X_train = wr.s3.read_csv(f"{final}{consts.TRAIN}/X_{consts.TRAIN}.csv")
-            y_train = wr.s3.read_csv(f"{final}{consts.TRAIN}/y_{consts.TRAIN}.csv").squeeze()
-            X_test = wr.s3.read_csv(f"{final}{consts.TEST}/X_{consts.TEST}.csv")
-            y_test = wr.s3.read_csv(f"{final}{consts.TEST}/y_{consts.TEST}.csv").squeeze()
+            curated = f"{consts.S3}{consts.ZONA_CURATED}"
+            X_train = wr.s3.read_parquet(f"{curated}{consts.TRAIN}/X.parquet")
+            y_train = wr.s3.read_parquet(f"{curated}{consts.TRAIN}/y.parquet").squeeze()
+            X_test = wr.s3.read_parquet(f"{curated}{consts.TEST}/X.parquet")
+            y_test = wr.s3.read_parquet(f"{curated}{consts.TEST}/y.parquet").squeeze()
             log.info(f"_entrenar: train {X_train.shape}, test {X_test.shape}")
 
             modelo = XGBClassifier(**HIPERPARAMETROS)
@@ -149,8 +153,21 @@ def entrenar_acv():
                 _promover()
                 log.info(f"_registrar: no había champion, v{challenger} pasa a CHAMPION")
 
+            return challenger
+
+        def _publicar_en_el_lake(modelo, version):
+            """Sube el modelo a la zona models/ del lake, versionado (clase 6)."""
+            buffer = io.BytesIO()
+            joblib.dump(modelo, buffer)
+            key = f"{consts.ZONA_MODELS.split('/', 1)[1]}v{version}/{consts.MODEL_FILE}"
+            boto3.client("s3").put_object(
+                Bucket=consts.BUCKET, Key=key, Body=buffer.getvalue()
+            )
+            log.info(f"_publicar_en_el_lake: s3://{consts.BUCKET}/{key}")
+
         modelo, metricas, ejemplo = _entrenar()
-        _registrar(modelo, metricas, ejemplo)
+        version = _registrar(modelo, metricas, ejemplo)
+        _publicar_en_el_lake(modelo, version)
 
     entrenar_y_registrar()
 

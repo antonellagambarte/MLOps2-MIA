@@ -50,7 +50,7 @@ def etl_acv():
         import utils.constants as consts
 
         local_path = f"{consts.OPT_DATASET}{consts.ORIG_DATA_NAME}"
-        s3_path = f"{consts.S3}{consts.BUCKET_RAW}{consts.ORIG_DATA_NAME}"
+        s3_path = f"{consts.S3}{consts.ZONA_RAW}{consts.ORIG_DATA_NAME}"
 
         try:
             wr.s3.head_object(s3_path)
@@ -76,8 +76,8 @@ def etl_acv():
         import utils.constants as consts
         import utils.etl_utils as etl
 
-        data_original_path = f"{consts.S3}{consts.BUCKET_RAW}{consts.ORIG_DATA_NAME}"
-        data_end_path = f"{consts.S3}{consts.BUCKET_RAW}{consts.END_DATA_NAME}"
+        data_original_path = f"{consts.S3}{consts.ZONA_RAW}{consts.ORIG_DATA_NAME}"
+        data_end_path = f"{consts.S3}{consts.ZONA_STAGED}{consts.END_DATA_NAME}"
 
         dataset = wr.s3.read_csv(data_original_path)
         dataset.drop_duplicates(inplace=True, ignore_index=True)
@@ -90,7 +90,8 @@ def etl_acv():
         dataset_with_dummies = pd.get_dummies(
             data=dataset, columns=categorical_features, drop_first=True, dtype=int
         )
-        wr.s3.to_csv(df=dataset_with_dummies, path=data_end_path, index=False)
+        dataset_with_dummies.columns = dataset_with_dummies.columns.str.replace(" ", "_", regex=False)
+        wr.s3.to_parquet(df=dataset_with_dummies, path=data_end_path, index=False)
 
         client = boto3.client("s3")
         data_dict = etl.get_metadata_info(client)
@@ -125,8 +126,8 @@ def etl_acv():
 
         import utils.constants as consts
 
-        dataset = wr.s3.read_csv(f"{consts.S3}{consts.BUCKET_RAW}{consts.ORIG_DATA_NAME}")
-        dataset_with_dummies = wr.s3.read_csv(f"{consts.S3}{consts.BUCKET_RAW}{consts.END_DATA_NAME}")
+        dataset = wr.s3.read_csv(f"{consts.S3}{consts.ZONA_RAW}{consts.ORIG_DATA_NAME}")
+        dataset_with_dummies = wr.s3.read_parquet(f"{consts.S3}{consts.ZONA_STAGED}{consts.END_DATA_NAME}")
         target_col = Variable.get(consts.TARGET_COLUMN, default_var=consts.TARGET_COLUMN_DEFAULT)
 
         mlflow.set_tracking_uri(consts.MLFLOW_TRACKING_URI)
@@ -162,7 +163,7 @@ def etl_acv():
 
         import utils.constants as consts
 
-        dataset = wr.s3.read_csv(f"{consts.S3}{consts.BUCKET_RAW}{consts.END_DATA_NAME}")
+        dataset = wr.s3.read_parquet(f"{consts.S3}{consts.ZONA_STAGED}{consts.END_DATA_NAME}")
 
         test_size = float(Variable.get(consts.TEST_SIZE_VARIABLE, default_var=consts.TEST_SIZE_DEFAULT))
         target_col = Variable.get(consts.TARGET_COLUMN, default_var=consts.TARGET_COLUMN_DEFAULT)
@@ -174,11 +175,11 @@ def etl_acv():
             X, y, test_size=test_size, stratify=y, random_state=consts.RANDOM_SEED
         )
 
-        final = f"{consts.S3}{consts.BUCKET_FINAL}"
-        wr.s3.to_csv(df=X_train, path=f"{final}{consts.TRAIN}/X_{consts.TRAIN}.csv", index=False)
-        wr.s3.to_csv(df=X_test, path=f"{final}{consts.TEST}/X_{consts.TEST}.csv", index=False)
-        wr.s3.to_csv(df=y_train, path=f"{final}{consts.TRAIN}/y_{consts.TRAIN}.csv", index=False)
-        wr.s3.to_csv(df=y_test, path=f"{final}{consts.TEST}/y_{consts.TEST}.csv", index=False)
+        curated = f"{consts.S3}{consts.ZONA_CURATED}"
+        wr.s3.to_parquet(df=X_train, path=f"{curated}{consts.TRAIN}/X.parquet", index=False)
+        wr.s3.to_parquet(df=X_test, path=f"{curated}{consts.TEST}/X.parquet", index=False)
+        wr.s3.to_parquet(df=y_train, path=f"{curated}{consts.TRAIN}/y.parquet", index=False)
+        wr.s3.to_parquet(df=y_test, path=f"{curated}{consts.TEST}/y.parquet", index=False)
 
     @task(task_id="imputar_nulos")
     def imputar_nulos():
@@ -190,10 +191,10 @@ def etl_acv():
         import utils.constants as consts
         import utils.etl_utils as etl
 
-        path_train = f"{consts.S3}{consts.BUCKET_FINAL}{consts.TRAIN}/X_{consts.TRAIN}.csv"
-        path_test = f"{consts.S3}{consts.BUCKET_FINAL}{consts.TEST}/X_{consts.TEST}.csv"
-        X_train = wr.s3.read_csv(path_train)
-        X_test = wr.s3.read_csv(path_test)
+        path_train = f"{consts.S3}{consts.ZONA_CURATED}{consts.TRAIN}/X.parquet"
+        path_test = f"{consts.S3}{consts.ZONA_CURATED}{consts.TEST}/X.parquet"
+        X_train = wr.s3.read_parquet(path_train)
+        X_test = wr.s3.read_parquet(path_test)
 
         def grupo_etario(df):
             return pd.cut(
@@ -208,8 +209,8 @@ def etl_acv():
             relleno = grupo_etario(df).map(medianas).astype(float).fillna(mediana_global)
             df["bmi"] = df["bmi"].fillna(relleno)
 
-        wr.s3.to_csv(df=X_train, path=path_train, index=False)
-        wr.s3.to_csv(df=X_test, path=path_test, index=False)
+        wr.s3.to_parquet(df=X_train, path=path_train, index=False)
+        wr.s3.to_parquet(df=X_test, path=path_test, index=False)
 
         client = boto3.client("s3")
         data_dict = etl.get_metadata_info(client)
@@ -231,17 +232,17 @@ def etl_acv():
         import utils.constants as consts
         import utils.etl_utils as etl
 
-        path_train = f"{consts.S3}{consts.BUCKET_FINAL}{consts.TRAIN}/X_{consts.TRAIN}.csv"
-        path_test = f"{consts.S3}{consts.BUCKET_FINAL}{consts.TEST}/X_{consts.TEST}.csv"
-        X_train = wr.s3.read_csv(path_train)
-        X_test = wr.s3.read_csv(path_test)
+        path_train = f"{consts.S3}{consts.ZONA_CURATED}{consts.TRAIN}/X.parquet"
+        path_test = f"{consts.S3}{consts.ZONA_CURATED}{consts.TEST}/X.parquet"
+        X_train = wr.s3.read_parquet(path_train)
+        X_test = wr.s3.read_parquet(path_test)
 
         sc_X = StandardScaler(with_mean=True, with_std=True)
         X_train = pd.DataFrame(sc_X.fit_transform(X_train), columns=X_train.columns)
         X_test = pd.DataFrame(sc_X.transform(X_test), columns=X_test.columns)
 
-        wr.s3.to_csv(df=X_train, path=path_train, index=False)
-        wr.s3.to_csv(df=X_test, path=path_test, index=False)
+        wr.s3.to_parquet(df=X_train, path=path_train, index=False)
+        wr.s3.to_parquet(df=X_test, path=path_test, index=False)
 
         client = boto3.client("s3")
         data_dict = etl.get_metadata_info(client)
