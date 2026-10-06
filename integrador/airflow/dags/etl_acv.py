@@ -64,8 +64,7 @@ def etl_acv():
 
     @task(task_id="generar_dummies")
     def generar_dummies():
-        """Saca duplicados y convierte las categóricas a one-hot. Deja en
-        data.json la lista de columnas antes y después, que la API va a usar."""
+        """Saca duplicados y convierte las categóricas a one-hot."""
         import datetime
 
         import awswrangler as wr
@@ -93,7 +92,6 @@ def etl_acv():
         )
         wr.s3.to_csv(df=dataset_with_dummies, path=data_end_path, index=False)
 
-        # Metadata del dataset, para la API
         client = boto3.client("s3")
         data_dict = etl.get_metadata_info(client)
 
@@ -157,8 +155,7 @@ def etl_acv():
 
     @task(task_id="separar_dataset")
     def separar_dataset():
-        """Separa en entrenamiento y prueba, estratificando por la clase (que está
-        muy desbalanceada: menos del 5% de positivos)."""
+        """Separa en train y test, estratificando por la clase."""
         import awswrangler as wr
         from airflow.models import Variable
         from sklearn.model_selection import train_test_split
@@ -185,8 +182,7 @@ def etl_acv():
 
     @task(task_id="imputar_nulos")
     def imputar_nulos():
-        """Imputa los nulos de bmi con la mediana de su grupo etario.
-        """
+        """Imputa los nulos de bmi con la mediana de su grupo etario."""
         import awswrangler as wr
         import boto3
         import pandas as pd
@@ -225,8 +221,7 @@ def etl_acv():
 
     @task(task_id="normalizar")
     def normalizar():
-        """Estandariza las columnas: fit en train, transform en test. Deja la media
-        y el desvío en data.json y completa el run de ETL en MLflow."""
+        """Estandariza las columnas: fit en train, transform en test."""
         import awswrangler as wr
         import boto3
         import mlflow
