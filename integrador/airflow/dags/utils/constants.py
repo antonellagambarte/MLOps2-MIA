@@ -1,12 +1,13 @@
 """Rutas y constantes compartidas por los DAGs. Viene del TP de MLOps I."""
-
-# Rutas
 S3 = "s3://"
 BUCKET = "data"
-BUCKET_RAW = "data/raw/"
-BUCKET_FINAL = "data/final/"
+ZONA_RAW = "data/raw/acv/"
+ZONA_STAGED = "data/staged/acv/"
+ZONA_CURATED = "data/curated/acv/"
+ZONA_MODELS = "data/models/"
 ORIG_DATA_NAME = "healthcare-dataset-stroke-data.csv"
-END_DATA_NAME = "stroke_dummies.csv"
+END_DATA_NAME = "stroke_dummies.parquet"
+MODEL_FILE = "predictor_acv.pkl"
 DATA_INFO_PATH = "data_info/data.json"
 OPT_DATASET = "/opt/airflow/dataset/"
 OPT_DAGS = "/opt/airflow/dags/"

@@ -1,73 +1,105 @@
+"""
+API de predicción de accidente cerebrovascular (adaptado de mini-TP1)
+"""
+import json
 import os
 from typing import Literal, Optional
-
+import boto3
 import mlflow
-import pandas as pd
-from fastapi import APIRouter, FastAPI, HTTPException
-from mlflow.models import Model
+import numpy as np
+from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel, Field
 from strawberry.fastapi import GraphQLRouter
 
 from esquema_graphql import schema as schema_graphql
+from src import predict as model_predict
 
 NOMBRE_MODELO = os.getenv("NOMBRE_MODELO", "predictor_acv")
 ALIAS_MODELO = os.getenv("ALIAS_MODELO", "champion")
 URI_MODELO = f"models:/{NOMBRE_MODELO}@{ALIAS_MODELO}"
 
 # --- CARGA DEL MODELO ---
-pipeline = None
-VERSION_MODELO = None
-UMBRAL = None
-FEATURES = []
-RUN_ID = None
-ERROR_CARGA = None
+# Se carga al arrancar. Si falla, la API igual levanta y /health lo reporta.
+model = None
+version_model = None
+run_id_model = None
+umbral = None
+data_dict = None
+error_carga = None
 
 
-def cargar_modelo():
-    global pipeline, VERSION_MODELO, UMBRAL, FEATURES, RUN_ID, ERROR_CARGA
+def load_model(model_name: str, alias: str):
+    """Trae el modelo desde MLflow y la metadata del ETL (data.json) desde S3.
+
+    Devuelve (modelo, versión, run_id, umbral, data_dict). MLflow entrega la
+    dirección del artefacto. El archivo se baja de MinIO.
+    """
+    client_mlflow = MlflowClient()
+    model_data_mlflow = client_mlflow.get_model_version_by_alias(model_name, alias)
+    model_ml = mlflow.sklearn.load_model(model_data_mlflow.source)
+    version_model_ml = model_data_mlflow.version
+    umbral_ml = float(model_data_mlflow.tags.get("umbral", 0.5))
+
+    # Metadata del ETL: categorías, columnas, medianas y escalado
+    s3 = boto3.client("s3")
+    result_s3 = s3.get_object(Bucket="data", Key="data_info/data.json")
+    data_dictionary = json.loads(result_s3["Body"].read().decode())
+    data_dictionary["standard_scaler_mean"] = np.array(data_dictionary["standard_scaler_mean"])
+    data_dictionary["standard_scaler_std"] = np.array(data_dictionary["standard_scaler_std"])
+
+    print(f"Modelo {model_name}@{alias} cargado: versión {version_model_ml}, umbral {umbral_ml}")
+    return model_ml, version_model_ml, model_data_mlflow.run_id, umbral_ml, data_dictionary
+
+
+def cargar():
+    global model, version_model, run_id_model, umbral, data_dict, error_carga
     try:
-        cliente = MlflowClient()
-        version = cliente.get_model_version_by_alias(NOMBRE_MODELO, ALIAS_MODELO)
-
-        pipeline = mlflow.sklearn.load_model(URI_MODELO)
-        VERSION_MODELO = version.version
-        RUN_ID = version.run_id
-        # El umbral viaja como tag de la versión: cada modelo trae el suyo.
-        UMBRAL = float(version.tags.get("umbral", 0.5))
-
-        # Las features salen de la firma que MLflow guardó junto al modelo.
-        esquema = Model.load(URI_MODELO).get_input_schema()
-        FEATURES = list(esquema.input_names()) if esquema else []
-
-        ERROR_CARGA = None
+        model, version_model, run_id_model, umbral, data_dict = load_model(NOMBRE_MODELO, ALIAS_MODELO)
+        error_carga = None
     except Exception as error:
-        ERROR_CARGA = f"{type(error).__name__}: {error}"
+        error_carga = f"{type(error).__name__}: {error}"
+        print(f"No se pudo cargar el modelo: {error_carga}")
 
 
-cargar_modelo()
+def check_model():
+    """Corre en segundo plano después de cada predicción: si el champion cambió
+    de versión (porque el DAG de entrenamiento promovió uno nuevo), lo recarga
+    sin reiniciar la API."""
+    try:
+        nueva_version = MlflowClient().get_model_version_by_alias(NOMBRE_MODELO, ALIAS_MODELO).version
+        if nueva_version != version_model:
+            cargar()
+    except Exception:
+        pass
+
+
+cargar()
 
 app = FastAPI(title="Predictor de accidente cerebrovascular")
 
 
-@app.get("/health")
-def chequeo_health():
-    if pipeline is None:
+def verificar_modelo():
+    """Corta con 503 si el modelo no está cargado"""
+    if model is None:
         raise HTTPException(
             status_code=503,
-            detail=f"No se pudo cargar {URI_MODELO}. {ERROR_CARGA}",
+            detail=f"No se pudo cargar {URI_MODELO}. {error_carga}",
         )
+
+
+@app.get("/health")
+def chequeo_health():
+    verificar_modelo()
     return {
         "status": "healthy",
         "modelo_cargado": True,
-        "version_modelo": VERSION_MODELO,
-        "umbral": UMBRAL,
+        "version_modelo": version_model,
+        "umbral": umbral,
     }
 
 
 # --- DEFINICIÓN DE ENTRADA ---
-
-
 class Caracteristicas(BaseModel):
     gender: Literal["Male", "Female", "Other"] = Field(
         ..., description="Género del paciente"
@@ -130,14 +162,6 @@ class InfoModelo(BaseModel):
 router_v1 = APIRouter(prefix="/v1", tags=["Modelo 1"])
 
 
-def verificar_modelo():
-    if pipeline is None:
-        raise HTTPException(
-            status_code=503,
-            detail=f"No se pudo cargar {URI_MODELO}. {ERROR_CARGA}",
-        )
-
-
 # --- ENDPOINTS DE MODELO ---
 
 @router_v1.get("/model", response_model=InfoModelo)
@@ -145,39 +169,39 @@ def info_modelo():
     verificar_modelo()
     return InfoModelo(
         nombre=NOMBRE_MODELO,
-        version=VERSION_MODELO,
-        umbral=UMBRAL,
-        features=FEATURES,
+        version=version_model,
+        umbral=umbral,
+        features=data_dict["columns"],
     )
 
 
 @router_v1.get("/model/metrics", response_model=MetricasModelo)
 def metricas_modelo():
     verificar_modelo()
-    metricas = MlflowClient().get_run(RUN_ID).data.metrics
+    metricas = MlflowClient().get_run(run_id_model).data.metrics
     return MetricasModelo(**metricas)
 
 
 @router_v1.post("/predict", response_model=Prediccion)
-def predecir(paciente: Caracteristicas):
+def predecir(paciente: Caracteristicas, background_tasks: BackgroundTasks):
     verificar_modelo()
-    df = pd.DataFrame([paciente.model_dump()])
 
     try:
-        probabilidad = pipeline.predict_proba(df)[0, 1]
+        clase, probabilidad = model_predict.run(paciente.model_dump(), data_dict, model, umbral)
     except Exception as error:
         raise HTTPException(
             status_code=500,
             detail=f"Error al ejecutar el modelo: {error}",
         )
 
-    clase = int(probabilidad >= UMBRAL)
+    # Después de responder, chequea si hay un champion nuevo
+    background_tasks.add_task(check_model)
 
     return Prediccion(
         prediccion=clase,
         descripcion="Tiene riesgo de ACV" if clase == 1 else "No tiene riesgo de ACV",
         probabilidad=probabilidad,
-        version_modelo=VERSION_MODELO,
+        version_modelo=version_model,
     )
 
 
