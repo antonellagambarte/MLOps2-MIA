@@ -1,7 +1,8 @@
 # Configuración común a los cuatro contenedores de Airflow. Se define una vez acá
 # (&airflow-common) y cada servicio la reusa con "<<: *airflow-common".
 x-airflow-common: &airflow-common
-  image: apache/airflow:3.0.2
+  build: ./dockerfiles/airflow
+  image: integrador/airflow:local
   env_file: .env
   environment: &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -13,7 +14,6 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
-    # Coordenadas del resto de la plataforma, para que las usen los DAGs
     AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
     AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
     AWS_ENDPOINT_URL_S3: http://minio:9000
@@ -24,6 +24,7 @@ x-airflow-common: &airflow-common
     - ./airflow/logs:/opt/airflow/logs
     - ./airflow/plugins:/opt/airflow/plugins
     - ./airflow/config:/opt/airflow/config
+    - ./dataset:/opt/airflow/dataset
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on: &airflow-common-depends-on
     postgres:
@@ -32,8 +33,6 @@ x-airflow-common: &airflow-common
       condition: service_healthy
 
 services:
-  # Metadata de la plataforma: MLflow (experimentos, runs, registro de modelos)
-  # y Airflow (DAGs, task instances, conexiones) en dos bases lógicas separadas.
   postgres:
     image: postgres:16-alpine
     container_name: integrador_postgres
@@ -44,12 +43,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      # Afuera 5433 para no chocar con un Postgres instalado en la máquina.
-      # Los demás servicios le hablan por postgres:5432, dentro de la red de compose.
       - "${POSTGRES_HOST_PORT}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      # Se ejecuta solo en la primera inicialización, con el volumen vacío.
       - ./dockerfiles/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -57,8 +53,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # Data Lake S3: los datos (crudos y procesados) y los artefactos de MLflow
-  # (modelos serializados, gráficos).
   minio:
     image: minio/minio:latest
     container_name: integrador_minio
@@ -69,8 +63,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     ports:
-      - "${MINIO_API_PORT}:9000"      # API S3: la que usan MLflow, los DAGs y la API
-      - "${MINIO_CONSOLE_PORT}:9001"  # consola web, solo para mirar
+      - "${MINIO_API_PORT}:9000"
+      - "${MINIO_CONSOLE_PORT}:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -79,7 +73,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # Contenedor de un solo uso: crea los buckets y termina. No queda corriendo.
   minio-init:
     image: minio/mc:latest
     container_name: integrador_minio_init
@@ -94,9 +87,6 @@ services:
       mc mb --ignore-existing local/${MINIO_MLFLOW_BUCKET} &&
       echo 'buckets listos';
       "
-
-  # Tracking (qué se entrenó y con qué resultado) + Model Registry (qué versión
-  # va a producción). La metadata la escribe en Postgres y los artefactos en MinIO.
   mlflow:
     build: ./dockerfiles/mlflow
     image: integrador/mlflow:local
@@ -104,7 +94,6 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Credenciales de MinIO, con los nombres que esperan boto3 y mlflow (hablan S3)
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       MLFLOW_S3_ENDPOINT_URL: http://minio:9000
@@ -128,12 +117,11 @@ services:
       timeout: 5s
       retries: 10
 
-  # Un solo uso: crea las tablas de Airflow en la base y el usuario admin.
   airflow-init:
     <<: *airflow-common
     container_name: integrador_airflow_init
     restart: "no"
-    user: "0:0"   # root, para poder ajustar los permisos de las carpetas montadas
+    user: "0:0"
     entrypoint: /bin/bash
     command:
       - -c
@@ -148,7 +136,6 @@ services:
       _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER}
       _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
 
-  # La interfaz web y la API REST de Airflow.
   airflow-apiserver:
     <<: *airflow-common
     container_name: integrador_airflow_apiserver
@@ -167,7 +154,6 @@ services:
       retries: 10
       start_period: 30s
 
-  # Decide qué tarea corre y cuándo, y con LocalExecutor también las ejecuta.
   airflow-scheduler:
     <<: *airflow-common
     container_name: integrador_airflow_scheduler
@@ -184,7 +170,6 @@ services:
       retries: 10
       start_period: 30s
 
-  # Lee los archivos de airflow/dags/ y los convierte en DAGs registrados.
   airflow-dag-processor:
     <<: *airflow-common
     container_name: integrador_airflow_dag_processor
@@ -201,7 +186,6 @@ services:
       retries: 10
       start_period: 30s
 
-  # Sirve el modelo. Le pide el champion a MLflow y baja el artefacto de MinIO.
   fastapi:
     build:
       context: .
