@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import threading
 import time
 from collections import deque
 from datetime import date
@@ -28,6 +29,11 @@ CORTE = int(os.getenv("CORTE", "200"))
 LOTE_LAKE = int(os.getenv("LOTE_LAKE", "200"))
 MEDIA_GLUCOSA_ENTRENAMIENTO = float(os.getenv("MEDIA_GLUCOSA_ENTRENAMIENTO", "106"))
 UMBRAL_DRIFT = float(os.getenv("UMBRAL_DRIFT", "130"))
+INTERVALO_RECARGA = float(os.getenv("INTERVALO_RECARGA_SEG", "30"))
+
+# (modelo, version, umbral, datos). Se reemplaza entero, no campo por campo, para que
+# el bucle de eventos nunca lea el modelo nuevo con la metadata vieja.
+estado = None
 
 
 def cargar_modelo():
@@ -45,6 +51,21 @@ def cargar_modelo():
     umbral = float(version.tags.get("umbral", 0.5))
     print(f"Modelo cargado del lake: s3://{BUCKET}/{key} | version {version.version} | umbral {umbral}")
     return modelo, version.version, umbral, datos
+
+
+def vigilar_champion():
+    """Recarga el modelo si el DAG promovio otro champion, sin frenar el consumo."""
+    global estado
+    while True:
+        time.sleep(INTERVALO_RECARGA)
+        try:
+            version = MlflowClient().get_model_version_by_alias(
+                NOMBRE_MODELO, ALIAS_MODELO
+            ).version
+            if version != estado[1]:
+                estado = cargar_modelo()
+        except Exception as error:
+            print(f"No se pudo chequear el champion: {error}")
 
 
 def proxima_parte(s3, prefijo):
@@ -77,8 +98,10 @@ def metricas(ventana):
 
 
 def main():
+    global estado
     mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
-    modelo, version, umbral, datos = cargar_modelo()
+    estado = cargar_modelo()
+    threading.Thread(target=vigilar_champion, daemon=True).start()
     s3 = boto3.client("s3")
 
     consumidor = KafkaConsumer(
@@ -99,6 +122,8 @@ def main():
     procesados = 0
 
     for mensaje in consumidor:
+        # Una sola lectura por evento: el vigilante pudo haberlo cambiado.
+        modelo, version, umbral, datos = estado
         paciente = mensaje.value["paciente"]
         t_evento = mensaje.value["t"]
 
