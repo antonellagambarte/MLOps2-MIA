@@ -2,6 +2,8 @@
 import io
 import json
 import os
+import threading
+import time
 from concurrent import futures
 
 import boto3
@@ -13,41 +15,14 @@ from mlflow.tracking import MlflowClient
 
 import scoring_pb2
 import scoring_pb2_grpc
+from mapas import MAPAS
 from src import predict as model_predict
 
 NOMBRE_MODELO = os.getenv("NOMBRE_MODELO", "predictor_acv")
 ALIAS_MODELO = os.getenv("ALIAS_MODELO", "champion")
 BUCKET = os.getenv("BUCKET_DATOS", "data")
 PUERTO = int(os.getenv("GRPC_PORT", "50051"))
-
-MAPAS = {
-    "gender": {
-        scoring_pb2.GENERO_MALE: "Male",
-        scoring_pb2.GENERO_FEMALE: "Female",
-        scoring_pb2.GENERO_OTHER: "Other",
-    },
-    "ever_married": {
-        scoring_pb2.ESTADO_CIVIL_YES: "Yes",
-        scoring_pb2.ESTADO_CIVIL_NO: "No",
-    },
-    "work_type": {
-        scoring_pb2.TIPO_TRABAJO_PRIVATE: "Private",
-        scoring_pb2.TIPO_TRABAJO_SELF_EMPLOYED: "Self-employed",
-        scoring_pb2.TIPO_TRABAJO_GOVT_JOB: "Govt_job",
-        scoring_pb2.TIPO_TRABAJO_CHILDREN: "children",
-        scoring_pb2.TIPO_TRABAJO_NEVER_WORKED: "Never_worked",
-    },
-    "Residence_type": {
-        scoring_pb2.TIPO_RESIDENCIA_URBAN: "Urban",
-        scoring_pb2.TIPO_RESIDENCIA_RURAL: "Rural",
-    },
-    "smoking_status": {
-        scoring_pb2.TABAQUISMO_FORMERLY_SMOKED: "formerly smoked",
-        scoring_pb2.TABAQUISMO_NEVER_SMOKED: "never smoked",
-        scoring_pb2.TABAQUISMO_SMOKES: "smokes",
-        scoring_pb2.TABAQUISMO_UNKNOWN: "Unknown",
-    },
-}
+INTERVALO_RECARGA = float(os.getenv("INTERVALO_RECARGA_SEG", "30"))
 
 
 def cargar_modelo():
@@ -103,20 +78,47 @@ def a_diccionario(caso):
 
 class ServicioScoring(scoring_pb2_grpc.ScoringServicer):
     def __init__(self):
-        self.modelo, self.version, self.umbral, self.datos = cargar_modelo()
+        self.estado = None
+        self.error = None
+        self._cargar()
+        threading.Thread(target=self._vigilar, daemon=True).start()
+
+    def _cargar(self):
+        try:
+            self.estado = cargar_modelo()
+            self.error = None
+        except Exception as error:
+            self.error = f"{type(error).__name__}: {error}"
+            print(f"No se pudo cargar el modelo: {self.error}")
+
+    def _vigilar(self):
+        """Carga el modelo si falto al arrancar, y lo recarga si promovieron otro champion."""
+        while True:
+            time.sleep(INTERVALO_RECARGA)
+            try:
+                version = MlflowClient().get_model_version_by_alias(
+                    NOMBRE_MODELO, ALIAS_MODELO
+                ).version
+                if self.estado is None or version != self.estado[1]:
+                    self._cargar()
+            except Exception as error:
+                print(f"No se pudo chequear el champion: {error}")
 
     def _predecir(self, caso, context):
+        estado = self.estado
+        if estado is None:
+            context.abort(grpc.StatusCode.UNAVAILABLE, f"El modelo no esta cargado. {self.error}")
+        modelo, version, umbral, datos = estado
+
         problemas = validar(caso)
         if problemas:
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, "; ".join(problemas))
 
-        clase, probabilidad = model_predict.run(
-            a_diccionario(caso), self.datos, self.modelo, self.umbral
-        )
+        clase, probabilidad = model_predict.run(a_diccionario(caso), datos, modelo, umbral)
         return scoring_pb2.Prediccion(
             prediccion=clase,
             probabilidad=probabilidad,
-            version_modelo=str(self.version),
+            version_modelo=str(version),
             descripcion="Tiene riesgo de ACV" if clase else "No tiene riesgo de ACV",
         )
 
