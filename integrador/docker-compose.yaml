@@ -196,15 +196,16 @@ services:
     env_file: .env
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ENDPOINT_URL_S3: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       NOMBRE_MODELO: predictor_acv
       ALIAS_MODELO: champion
-      GRPC_DESTINO: grpc:50051
     ports:
       - "${API_HOST_PORT}:8800"
     depends_on:
       mlflow:
-        condition: service_healthy
-      grpc:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8800/health"]
@@ -259,14 +260,6 @@ services:
     depends_on:
       mlflow:
         condition: service_healthy
-    healthcheck:
-      # Chequea que el puerto responda, no que el modelo este cargado: si todavia
-      # no hay champion el servicio igual escucha y lo reporta en cada llamada.
-      test: ["CMD-SHELL", "python -c \"import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)\""]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 30s
 
   streaming-worker:
     build:

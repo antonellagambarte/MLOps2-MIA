@@ -1,7 +1,5 @@
 """Cliente de prueba del servicio gRPC: unary, server-streaming y latencia contra REST.
 
-Es el entregable del mini-TP 3. La comparacion de latencia ahora mide solo el costo
-del protocolo: los dos caminos terminan en el mismo modelo, porque la API delega aca.
 """
 import os
 import statistics
@@ -14,7 +12,7 @@ import scoring_pb2
 import scoring_pb2_grpc
 from mapas import INVERSOS
 
-DESTINO = os.getenv("GRPC_DESTINO", "localhost:50051")
+DESTINO = os.getenv("GRPC_DESTINO", "grpc:50051")
 REST = os.getenv("REST_URL", "http://fastapi:8800/v1/predict")
 N = int(os.getenv("N_MEDICIONES", "100"))
 
@@ -51,7 +49,8 @@ def mensaje(paciente):
 
 
 def medir(llamada):
-    llamada()  # la primera calienta la conexion y no se cuenta
+    for _ in range(20):
+        llamada()  # calentar la conexion; estas no se cuentan
     tiempos = []
     for _ in range(N):
         inicio = time.perf_counter()
@@ -77,9 +76,9 @@ def main():
     print(f"--- latencia, n={N} ---")
     media_grpc, p50_grpc, p95_grpc = medir(lambda: stub.Predecir(caso))
     media_rest, p50_rest, p95_rest = medir(lambda: requests.post(REST, json=PACIENTE))
-    print(f"  gRPC directo    media {media_grpc:6.2f} ms | p50 {p50_grpc:6.2f} | p95 {p95_grpc:6.2f}")
-    print(f"  REST delegando  media {media_rest:6.2f} ms | p50 {p50_rest:6.2f} | p95 {p95_rest:6.2f}")
-    print(f"  La diferencia es el costo de la puerta HTTP: {media_rest / media_grpc:.2f}x")
+    print(f"  gRPC            media {media_grpc:6.2f} ms | p50 {p50_grpc:6.2f} | p95 {p95_grpc:6.2f}")
+    print(f"  REST            media {media_rest:6.2f} ms | p50 {p50_rest:6.2f} | p95 {p95_rest:6.2f}")
+    print(f"  REST/gRPC: {media_rest / media_grpc:.2f}x")
 
 
 if __name__ == "__main__":
