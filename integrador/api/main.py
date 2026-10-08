@@ -5,7 +5,7 @@ Sirve dos protocolos sobre el mismo modelo: REST para predecir y GraphQL para
 consultar metadatos y también predecir. El modelo lo carga y lo mantiene al día
 el módulo modelo.py, que los dos comparten.
 """
-from fastapi import APIRouter, BackgroundTasks, FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel
 from strawberry.fastapi import GraphQLRouter
@@ -78,7 +78,7 @@ def metricas_modelo():
 
 
 @router_v1.post("/predict", response_model=Prediccion)
-def predecir(paciente: Caracteristicas, background_tasks: BackgroundTasks):
+def predecir(paciente: Caracteristicas):
     verificar_modelo()
 
     try:
@@ -88,9 +88,6 @@ def predecir(paciente: Caracteristicas, background_tasks: BackgroundTasks):
             status_code=500,
             detail=f"Error al ejecutar el modelo: {error}",
         )
-
-    # Después de responder, chequea si hay un champion nuevo
-    background_tasks.add_task(modelo.check_model)
 
     return Prediccion(
         prediccion=clase,

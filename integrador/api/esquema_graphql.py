@@ -77,7 +77,7 @@ class Prediccion:
 @strawberry.type
 class Mutation:
     @strawberry.mutation
-    def predecir(self, paciente: PacienteInput, info: strawberry.Info) -> Prediccion:
+    def predecir(self, paciente: PacienteInput) -> Prediccion:
         # El .proto de gRPC tipa las categoricas con enum; GraphQL las recibe como
         # texto, asi que la validacion la hace el mismo Pydantic que usa REST.
         try:
@@ -100,11 +100,6 @@ class Mutation:
             raise ValueError(problemas)
 
         clase, probabilidad, version, descripcion = modelo.predecir(validado.model_dump())
-
-        # Igual que REST: el chequeo del champion corre despues de responder, no en el
-        # camino de la peticion. Strawberry pasa las BackgroundTasks de FastAPI por context.
-        info.context["background_tasks"].add_task(modelo.check_model)
-
         return Prediccion(
             prediccion=clase,
             probabilidad=probabilidad,

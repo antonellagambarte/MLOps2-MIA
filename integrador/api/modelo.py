@@ -2,6 +2,8 @@
 """
 import json
 import os
+import threading
+import time
 
 import boto3
 import mlflow
@@ -13,6 +15,7 @@ from src import predict as model_predict
 NOMBRE_MODELO = os.getenv("NOMBRE_MODELO", "predictor_acv")
 ALIAS_MODELO = os.getenv("ALIAS_MODELO", "champion")
 URI_MODELO = f"models:/{NOMBRE_MODELO}@{ALIAS_MODELO}"
+INTERVALO_RECARGA = float(os.getenv("INTERVALO_RECARGA_SEG", "30"))
 
 # Se carga al arrancar. Si falla, la API igual levanta y /health lo reporta.
 model = None
@@ -68,6 +71,14 @@ def check_model():
         pass
 
 
+def vigilar_champion():
+    """Dispara check_model() cada tanto, igual que el servidor gRPC y el worker.
+    """
+    while True:
+        time.sleep(INTERVALO_RECARGA)
+        check_model()
+
+
 def predecir(paciente: dict):
     """Puntúa un paciente ya validado. Devuelve (clase, probabilidad, versión, descripción)."""
     if model is None:
@@ -78,3 +89,4 @@ def predecir(paciente: dict):
 
 
 cargar()
+threading.Thread(target=vigilar_champion, daemon=True).start()
