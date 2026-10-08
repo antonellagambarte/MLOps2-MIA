@@ -7,9 +7,7 @@ RUN apt-get update \
 
 COPY requirements.txt /requirements.txt
 
-# Los --trusted-host son por el antivirus (AVG) de la máquina de desarrollo:
-# con el escaneo de HTTPS activado, intercepta la conexión a PyPI y la vuelve a
-# firmar con un certificado propio.
+# Los --trusted-host son por el antivirus (AVG)
 RUN pip install --no-cache-dir \
     --trusted-host pypi.org \
     --trusted-host files.pythonhosted.org \

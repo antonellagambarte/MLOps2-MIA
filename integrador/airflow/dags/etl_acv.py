@@ -11,10 +11,13 @@ sys.path.append("/opt/airflow/dags")
 texto_markdown = """
 ### Proceso ETL para los datos de ACV
 
-Toma el CSV original del [Stroke Prediction Dataset](https://www.kaggle.com/datasets/fedesoriano/stroke-prediction-dataset),
-lo sube a `s3://data/raw/`, genera las variables dummy, lo separa en entrenamiento
-y prueba (estratificado), imputa los nulos de `bmi` y estandariza las columnas.
-Los datasets finales quedan en `s3://data/final/`.
+Toma el CSV original del [Stroke Prediction Dataset](https://www.kaggle.com/datasets/fedesoriano/stroke-prediction-dataset)
+y lo deja en las zonas del Data Lake, cada una con el formato que pide la clase 6:
+
+- `s3://data/raw/acv/` — el CSV tal cual llegó, sin la columna `id`. Zona inmutable.
+- `s3://data/staged/acv/` — Parquet, sin duplicados y con las categóricas en one-hot.
+- `s3://data/curated/acv/train/` y `.../test/` — Parquet con los nulos imputados y
+  las columnas estandarizadas, listo para entrenar.
 
 Todo lo que la API necesita para reproducir estas transformaciones sobre un
 paciente nuevo (columnas después del one-hot, medianas de imputación, media y

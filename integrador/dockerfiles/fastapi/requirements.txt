@@ -2,9 +2,11 @@ fastapi==0.141.1
 uvicorn[standard]==0.52.4
 pydantic==2.13.5
 strawberry-graphql[fastapi]
-pandas==3.0.5
-scikit-learn==1.9.0
-xgboost==3.2.0
-mlflow==3.16.0 
-boto3==1.43.90
-dill==0.3.1.1
+
+# Para hablar con el servicio de inferencia. grpcio-tools solo genera los stubs.
+grpcio==1.83.1
+grpcio-tools==1.83.1
+
+# skinny y no mlflow entero: la API solo consulta metadata del registro, y el
+# paquete completo arrastra pandas, numpy y scikit-learn que ya no se usan.
+mlflow-skinny==3.16.0

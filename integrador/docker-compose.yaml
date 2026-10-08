@@ -196,16 +196,15 @@ services:
     env_file: .env
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
-      AWS_ENDPOINT_URL_S3: http://minio:9000
-      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       NOMBRE_MODELO: predictor_acv
       ALIAS_MODELO: champion
+      GRPC_DESTINO: grpc:50051
     ports:
       - "${API_HOST_PORT}:8800"
     depends_on:
       mlflow:
+        condition: service_healthy
+      grpc:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8800/health"]
@@ -214,6 +213,102 @@ services:
       retries: 10
       start_period: 30s
 
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: integrador_redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    ports:
+      - "${REDPANDA_HOST_PORT}:9092"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  grpc:
+    build:
+      context: .
+      dockerfile: dockerfiles/grpc/Dockerfile
+    image: integrador/grpc:local
+    container_name: integrador_grpc
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      AWS_ENDPOINT_URL_S3: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      NOMBRE_MODELO: predictor_acv
+      ALIAS_MODELO: champion
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "${GRPC_HOST_PORT}:50051"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      # Chequea que el puerto responda, no que el modelo este cargado: si todavia
+      # no hay champion el servicio igual escucha y lo reporta en cada llamada.
+      test: ["CMD-SHELL", "python -c \"import grpc; grpc.channel_ready_future(grpc.insecure_channel('localhost:50051')).result(timeout=5)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  streaming-worker:
+    build:
+      context: .
+      dockerfile: dockerfiles/streaming/Dockerfile
+    image: integrador/streaming:local
+    container_name: integrador_streaming_worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      AWS_ENDPOINT_URL_S3: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      REDPANDA_BROKER: redpanda:9092
+      NOMBRE_MODELO: predictor_acv
+      ALIAS_MODELO: champion
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+
+  streaming-productor:
+    image: integrador/streaming:local
+    container_name: integrador_streaming_productor
+    restart: "no"
+    profiles: ["demo"]
+    env_file: .env
+    environment:
+      AWS_ENDPOINT_URL_S3: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      REDPANDA_BROKER: redpanda:9092
+      PYTHONUNBUFFERED: "1"
+    command: python productor.py
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   minio_data:
+  redpanda_data:
