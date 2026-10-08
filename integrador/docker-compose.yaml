@@ -214,6 +214,31 @@ services:
       retries: 10
       start_period: 30s
 
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: integrador_redpanda
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+    ports:
+      - "${REDPANDA_HOST_PORT}:9092"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   grpc:
     build:
       context: .
@@ -236,6 +261,47 @@ services:
       mlflow:
         condition: service_healthy
 
+  streaming-worker:
+    build:
+      context: .
+      dockerfile: dockerfiles/streaming/Dockerfile
+    image: integrador/streaming:local
+    container_name: integrador_streaming_worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      AWS_ENDPOINT_URL_S3: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      REDPANDA_BROKER: redpanda:9092
+      NOMBRE_MODELO: predictor_acv
+      ALIAS_MODELO: champion
+      PYTHONUNBUFFERED: "1"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+
+  streaming-productor:
+    image: integrador/streaming:local
+    container_name: integrador_streaming_productor
+    restart: "no"
+    profiles: ["demo"]
+    env_file: .env
+    environment:
+      AWS_ENDPOINT_URL_S3: http://minio:9000
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      REDPANDA_BROKER: redpanda:9092
+      PYTHONUNBUFFERED: "1"
+    command: python productor.py
+    depends_on:
+      redpanda:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   minio_data:
+  redpanda_data:
