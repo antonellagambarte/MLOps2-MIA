@@ -18,11 +18,7 @@ URI_MODELO = f"models:/{NOMBRE_MODELO}@{ALIAS_MODELO}"
 INTERVALO_RECARGA = float(os.getenv("INTERVALO_RECARGA_SEG", "30"))
 
 # Se carga al arrancar. Si falla, la API igual levanta y /health lo reporta.
-model = None
-version_model = None
-run_id_model = None
-umbral = None
-data_dict = None
+estado = None   # (model, version, run_id, umbral, data_dict)
 error_carga = None
 
 
@@ -50,9 +46,9 @@ def load_model(model_name: str, alias: str):
 
 
 def cargar():
-    global model, version_model, run_id_model, umbral, data_dict, error_carga
+    global estado, error_carga
     try:
-        model, version_model, run_id_model, umbral, data_dict = load_model(NOMBRE_MODELO, ALIAS_MODELO)
+        estado = load_model(NOMBRE_MODELO, ALIAS_MODELO)
         error_carga = None
     except Exception as error:
         error_carga = f"{type(error).__name__}: {error}"
@@ -65,7 +61,7 @@ def check_model():
     sin reiniciar la API."""
     try:
         nueva_version = MlflowClient().get_model_version_by_alias(NOMBRE_MODELO, ALIAS_MODELO).version
-        if nueva_version != version_model:
+        if estado is None or nueva_version != estado[1]:
             cargar()
     except Exception:
         pass
@@ -81,11 +77,13 @@ def vigilar_champion():
 
 def predecir(paciente: dict):
     """Puntúa un paciente ya validado. Devuelve (clase, probabilidad, versión, descripción)."""
-    if model is None:
+    actual = estado
+    if actual is None:
         raise RuntimeError(f"No se pudo cargar {URI_MODELO}. {error_carga}")
+    model, version, _run_id, umbral, data_dict = actual
     clase, probabilidad = model_predict.run(paciente, data_dict, model, umbral)
     descripcion = "Tiene riesgo de ACV" if clase == 1 else "No tiene riesgo de ACV"
-    return clase, probabilidad, version_model, descripcion
+    return clase, probabilidad, version, descripcion
 
 
 cargar()

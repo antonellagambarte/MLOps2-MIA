@@ -17,23 +17,25 @@ from esquema_graphql import schema as schema_graphql
 app = FastAPI(title="Predictor de accidente cerebrovascular")
 
 
-def verificar_modelo():
-    """Corta con 503 si el modelo no está cargado"""
-    if modelo.model is None:
+def estado_cargado():
+    """Devuelve el estado del modelo de una sola lectura, o corta con 503."""
+    actual = modelo.estado
+    if actual is None:
         raise HTTPException(
             status_code=503,
             detail=f"No se pudo cargar {modelo.URI_MODELO}. {modelo.error_carga}",
         )
+    return actual
 
 
 @app.get("/health")
 def chequeo_health():
-    verificar_modelo()
+    _, version, _, umbral, _ = estado_cargado()
     return {
         "status": "healthy",
         "modelo_cargado": True,
-        "version_modelo": modelo.version_model,
-        "umbral": modelo.umbral,
+        "version_modelo": version,
+        "umbral": umbral,
     }
 
 
@@ -61,25 +63,25 @@ router_v1 = APIRouter(prefix="/v1", tags=["Modelo 1"])
 
 @router_v1.get("/model", response_model=InfoModelo)
 def info_modelo():
-    verificar_modelo()
+    _, version, _, umbral, data_dict = estado_cargado()
     return InfoModelo(
         nombre=modelo.NOMBRE_MODELO,
-        version=modelo.version_model,
-        umbral=modelo.umbral,
-        features=modelo.data_dict["columns"],
+        version=version,
+        umbral=umbral,
+        features=data_dict["columns"],
     )
 
 
 @router_v1.get("/model/metrics", response_model=MetricasModelo)
 def metricas_modelo():
-    verificar_modelo()
-    metricas = MlflowClient().get_run(modelo.run_id_model).data.metrics
+    _, _, run_id, _, _ = estado_cargado()
+    metricas = MlflowClient().get_run(run_id).data.metrics
     return MetricasModelo(**metricas)
 
 
 @router_v1.post("/predict", response_model=Prediccion)
 def predecir(paciente: Caracteristicas):
-    verificar_modelo()
+    estado_cargado()   # 503 si todavia no hay modelo
 
     try:
         clase, probabilidad, version, descripcion = modelo.predecir(paciente.model_dump())
