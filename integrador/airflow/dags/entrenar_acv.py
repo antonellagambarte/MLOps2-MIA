@@ -9,9 +9,9 @@ sys.path.append("/opt/airflow/dags")
 texto_markdown = """
 ### Entrenamiento del modelo de ACV
 
-Lee los datos que dejó `etl_acv` en `s3://data/final/`, entrena un XGBoost con los
-hiperparámetros encontrados con Optuna, evalúa sobre test
-y registra el modelo en MLflow como `predictor_acv`.
+Lee los datos que dejó `etl_acv` en `s3://data/curated/acv/`, entrena un XGBoost
+con los hiperparámetros encontrados con Optuna, evalúa sobre test y registra el
+modelo en MLflow como `predictor_acv`.
 """
 
 # Encontrados con Optuna en Aprendizaje de Máquina I
