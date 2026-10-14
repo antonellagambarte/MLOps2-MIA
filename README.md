@@ -21,3 +21,4 @@ uv pip install -r requirements.txt
 - [Mini-TP 3](mini-tps/tp3/mini_tp3_actividad.ipynb) — Modelo servido por gRPC, comparado con REST
 - [Mini-TP 4](mini-tps/tp4/mini_tp4_actividad.ipynb) — Inferencia online sobre un flujo de eventos, comparada con batch
 - [Mini-TP 5](mini-tps/tp5/mini_tp5_federado_actividad.ipynb) — Aprendizaje federado: IID vs non-IID y privacidad diferencial
+- [**Trabajo integrador**](integrador/README.md) — la plataforma completa: REST, GraphQL, gRPC y streaming sobre el modelo de ACV
