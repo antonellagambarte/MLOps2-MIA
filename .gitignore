@@ -4,3 +4,8 @@ __pycache__/
 
 integrador/airflow/logs/*
 !integrador/airflow/logs/.gitkeep
+
+# Lo que genera Nuxt: se reinstala y se reconstruye
+integrador/frontend/node_modules/
+integrador/frontend/.nuxt/
+integrador/frontend/.output/
