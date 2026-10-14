@@ -301,6 +301,31 @@ services:
       redpanda:
         condition: service_healthy
 
+  frontend:
+    build:
+      context: .
+      dockerfile: dockerfiles/frontend/Dockerfile
+    image: integrador/frontend:local
+    container_name: integrador_frontend
+    restart: unless-stopped
+    # Sin env_file a proposito: el front no necesita ninguna credencial.
+    environment:
+      NUXT_API_BASE: http://fastapi:8800
+      NUXT_GRPC_TARGET: grpc:50051
+      # Sin esto, en Windows el watcher no ve los archivos nuevos del servidor.
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${FRONTEND_HOST_PORT}:3000"
+    volumes:
+      - ./frontend:/app
+      # Las dependencias quedan en la imagen: el montaje de arriba no las tapa.
+      - /app/node_modules
+      # Afuera de /app: ahi Docker crearia el punto de montaje en el repo.
+      - ./grpc_service/scoring.proto:/proto/scoring.proto:ro
+    depends_on:
+      fastapi:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   minio_data:
