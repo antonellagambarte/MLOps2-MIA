@@ -111,6 +111,70 @@ async function enviarLote() {
   }
 }
 
+const ROLES = ["analista", "admin", "invitado"]
+
+// Cada caso es un control distinto. "elegido" usa el rol de los botones de arriba.
+const CASOS = [
+  { id: "sinToken", etiqueta: "sin token", espera: 401, rol: null, roto: false },
+  { id: "rolMalo", etiqueta: "rol invitado", espera: 403, rol: "invitado", roto: false },
+  { id: "invalido", etiqueta: "age: 150", espera: 422, rol: "elegido", roto: true },
+  { id: "conToken", etiqueta: "con token", espera: 200, rol: "elegido", roto: false },
+]
+
+const rolElegido = ref("analista")
+const token = ref(null)
+const seguro = ref({})
+const rafaga = ref(null)
+const auditoria = ref(null)
+const esperandoSeguro = ref({})
+
+function codigo(r) {
+  return r.ok ? 200 : Number(String(r.status).replace(/\D/g, "")) || 0
+}
+
+async function pedirToken() {
+  token.value = await $fetch("/api/token", { method: "POST", body: { rol: rolElegido.value } })
+}
+
+async function probar(caso) {
+  esperandoSeguro.value = { ...esperandoSeguro.value, [caso.id]: true }
+  try {
+    const r = await $fetch("/api/secure", {
+      method: "POST",
+      body: {
+        rol: caso.rol === "elegido" ? rolElegido.value : caso.rol,
+        paciente: (caso.roto ? PACIENTES[3] : PACIENTES[0]).datos,
+      },
+    })
+    seguro.value = { ...seguro.value, [caso.id]: r }
+  } finally {
+    esperandoSeguro.value = { ...esperandoSeguro.value, [caso.id]: false }
+  }
+}
+
+async function golpear() {
+  esperandoSeguro.value = { ...esperandoSeguro.value, rafaga: true }
+  rafaga.value = null
+  try {
+    const codigos = []
+    for (let i = 0; i < 6; i++) {
+      // Usuario aparte: el limite es por usuario, asi la rafaga no consume el de los otros casos.
+      const r = await $fetch("/api/secure", {
+        method: "POST",
+        body: { rol: rolElegido.value, usuario: "rafaga", paciente: PACIENTES[0].datos },
+      })
+      codigos.push(codigo(r))
+    }
+    rafaga.value = codigos
+  } finally {
+    esperandoSeguro.value = { ...esperandoSeguro.value, rafaga: false }
+  }
+}
+
+async function verAuditoria() {
+  auditoria.value = await $fetch("/api/auditoria")
+}
+
 watch(elegido, () => { resultados.value = {} })
 
 onMounted(async () => {
@@ -304,6 +368,97 @@ onMounted(async () => {
         </tbody>
       </table>
     </section>
+    <!-- 5. La puerta protegida -->
+    <section class="panel ancha">
+      <h2>Seguridad · la puerta protegida</h2>
+      <p class="detalle">
+        <code>POST /v1/secure/predict</code> — el mismo modelo detrás de un token con rol,
+        un límite de 5 consultas por minuto y auditoría de cada predicción.
+        <code>/v1/predict</code> queda abierto y sin tocar.
+      </p>
+
+      <div class="controles">
+        <div class="tabs">
+          <button
+            v-for="r in ROLES"
+            :key="r"
+            :class="{ activo: r === rolElegido }"
+            @click="rolElegido = r"
+          >{{ r }}</button>
+        </div>
+        <button @click="pedirToken">pedir token</button>
+      </div>
+
+      <p v-if="token" class="token">
+        <code>{{ token.token.slice(0, 44) }}…</code>
+        <span>vence en {{ token.expira_en / 60 }} min</span>
+      </p>
+
+      <table class="barras">
+        <tbody>
+          <tr v-for="c in CASOS" :key="c.id">
+            <td>
+              <button :disabled="esperandoSeguro[c.id]" @click="probar(c)">probar</button>
+            </td>
+            <td>{{ c.etiqueta }}</td>
+            <td v-if="seguro[c.id]">
+              <span class="codigo" :class="{ mal: codigo(seguro[c.id]) >= 400 }">
+                {{ codigo(seguro[c.id]) }}
+              </span>
+            </td>
+            <td v-else class="gris">espera {{ c.espera }}</td>
+            <td>
+              <template v-if="seguro[c.id]">
+                <span v-if="seguro[c.id].ok" class="prob">
+                  {{ seguro[c.id].resultado.probabilidad }}
+                  &nbsp;v{{ seguro[c.id].resultado.version_modelo }}
+                </span>
+                <span v-else>
+                  {{ seguro[c.id].detalle.map((d) => (d.campo ? d.campo + ": " : "") + d.mensaje).join(" · ") }}
+                </span>
+              </template>
+            </td>
+          </tr>
+
+          <tr>
+            <td>
+              <button :disabled="esperandoSeguro.rafaga" @click="golpear">probar</button>
+            </td>
+            <td>6 en un minuto</td>
+            <td v-if="rafaga">
+              <span class="codigo mal">429</span>
+            </td>
+            <td v-else class="gris">espera 429</td>
+            <td>
+              <span v-for="(c, i) in rafaga" :key="i" class="codigo" :class="{ mal: c >= 400 }">
+                {{ c }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="controles" style="margin-top:1.1rem">
+        <button @click="verAuditoria">ver la auditoría</button>
+        <span class="detalle" style="margin:0">solo el rol <code>admin</code> puede leerla</span>
+      </div>
+
+      <table v-if="auditoria?.length" class="barras">
+        <thead><tr><th>hora</th><th>usuario</th><th>huella de la consulta</th><th>pred</th><th>modelo</th></tr></thead>
+        <tbody>
+          <tr v-for="(a, i) in auditoria" :key="i">
+            <td>{{ a.ts.slice(11, 19) }}</td>
+            <td>{{ a.usuario }}</td>
+            <td><code>{{ a.hash_entrada.slice(0, 16) }}…</code></td>
+            <td>{{ a.prediccion }}</td>
+            <td>v{{ a.version_modelo }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="auditoria" class="nota">
+        se guarda la huella de la consulta, no los datos del paciente
+      </p>
+    </section>
   </main>
 </template>
 
@@ -409,6 +564,18 @@ button {
 }
 button:disabled { opacity: .5; cursor: default; }
 button.ancho { width: 100%; margin-top: 1.1rem; }
+
+.token { margin: 0 0 1rem; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+.token code { background: #0d1218; padding: .35rem .6rem; border-radius: 6px; font-size: .82rem; }
+.token span { color: var(--gris); font-size: .86rem; }
+
+.codigo {
+  display: inline-block; min-width: 2.6rem; margin-right: .3rem; padding: .1rem .45rem;
+  border-radius: 5px; background: #14301f; color: var(--bien);
+  font-variant-numeric: tabular-nums; font-size: .88rem; text-align: center;
+}
+.codigo.mal { background: #3a1a1e; color: var(--mal); }
+.gris { color: var(--gris); font-size: .88rem; }
 
 @media (max-width: 1000px) {
   .columnas, .duelo { grid-template-columns: 1fr; }
