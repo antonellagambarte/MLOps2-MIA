@@ -7,6 +7,7 @@ export default defineNuxtConfig({
     apiBase: "http://fastapi:8800",
     grpcTarget: "grpc:50051",
     protoPath: "/proto/scoring.proto",
+    apiKeyTokens: "clave-de-servicio-local",
   },
 
   // En Windows los eventos del filesystem no cruzan al contenedor.

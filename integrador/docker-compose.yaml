@@ -308,10 +308,11 @@ services:
     image: integrador/frontend:local
     container_name: integrador_frontend
     restart: unless-stopped
-    # Sin env_file a proposito: el front no necesita ninguna credencial.
+    # Lo unico que recibe es la clave para pedir un token: ni MinIO ni la base.
     environment:
       NUXT_API_BASE: http://fastapi:8800
       NUXT_GRPC_TARGET: grpc:50051
+      NUXT_API_KEY_TOKENS: ${API_KEY_TOKENS}
       # Sin esto, en Windows el watcher no ve los archivos nuevos del servidor.
       CHOKIDAR_USEPOLLING: "true"
     ports:

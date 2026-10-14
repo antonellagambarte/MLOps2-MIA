@@ -13,6 +13,7 @@ from strawberry.fastapi import GraphQLRouter
 import modelo
 from contrato import Caracteristicas, Prediccion
 from esquema_graphql import schema as schema_graphql
+from seguridad import router as router_seguridad
 
 app = FastAPI(title="Predictor de accidente cerebrovascular")
 
@@ -100,5 +101,6 @@ def predecir(paciente: Caracteristicas):
 
 
 app.include_router(router_v1)
+app.include_router(router_seguridad)
 
 app.include_router(GraphQLRouter(schema_graphql), prefix="/graphql")

@@ -111,6 +111,81 @@ async function enviarLote() {
   }
 }
 
+const SECCIONES = [
+  { id: "prediccion", nombre: "Predicción", nota: "REST · GraphQL · gRPC" },
+  { id: "metadata", nombre: "Metadata", nota: "REST contra GraphQL" },
+  { id: "latencia", nombre: "Latencia", nota: "los tres, 200 veces" },
+  { id: "lote", nombre: "Lote", nota: "server-streaming, solo gRPC" },
+  { id: "seguridad", nombre: "Seguridad", nota: "token, límite y auditoría" },
+]
+
+const seccion = ref("prediccion")
+const barraAbierta = ref(true)
+
+const ROLES = ["analista", "admin", "invitado"]
+
+// Cada caso es un control distinto. "elegido" usa el rol de los botones de arriba.
+const CASOS = [
+  { id: "sinToken", etiqueta: "sin token", espera: 401, rol: null, roto: false },
+  { id: "rolMalo", etiqueta: "rol invitado", espera: 403, rol: "invitado", roto: false },
+  { id: "invalido", etiqueta: "age: 150", espera: 422, rol: "elegido", roto: true },
+  { id: "conToken", etiqueta: "con token", espera: 200, rol: "elegido", roto: false },
+]
+
+const rolElegido = ref("analista")
+const token = ref(null)
+const seguro = ref({})
+const rafaga = ref(null)
+const auditoria = ref(null)
+const esperandoSeguro = ref({})
+
+function codigo(r) {
+  return r.ok ? 200 : Number(String(r.status).replace(/\D/g, "")) || 0
+}
+
+async function pedirToken() {
+  token.value = await $fetch("/api/token", { method: "POST", body: { rol: rolElegido.value } })
+}
+
+async function probar(caso) {
+  esperandoSeguro.value = { ...esperandoSeguro.value, [caso.id]: true }
+  try {
+    const r = await $fetch("/api/secure", {
+      method: "POST",
+      body: {
+        rol: caso.rol === "elegido" ? rolElegido.value : caso.rol,
+        paciente: (caso.roto ? PACIENTES[3] : PACIENTES[0]).datos,
+      },
+    })
+    seguro.value = { ...seguro.value, [caso.id]: r }
+  } finally {
+    esperandoSeguro.value = { ...esperandoSeguro.value, [caso.id]: false }
+  }
+}
+
+async function golpear() {
+  esperandoSeguro.value = { ...esperandoSeguro.value, rafaga: true }
+  rafaga.value = null
+  try {
+    const codigos = []
+    for (let i = 0; i < 6; i++) {
+      // Usuario aparte: el limite es por usuario, asi la rafaga no consume el de los otros casos.
+      const r = await $fetch("/api/secure", {
+        method: "POST",
+        body: { rol: rolElegido.value, usuario: "rafaga", paciente: PACIENTES[0].datos },
+      })
+      codigos.push(codigo(r))
+    }
+    rafaga.value = codigos
+  } finally {
+    esperandoSeguro.value = { ...esperandoSeguro.value, rafaga: false }
+  }
+}
+
+async function verAuditoria() {
+  auditoria.value = await $fetch("/api/auditoria")
+}
+
 watch(elegido, () => { resultados.value = {} })
 
 onMounted(async () => {
@@ -124,6 +199,14 @@ onMounted(async () => {
 
 <template>
   <main>
+    <svg class="sprite" aria-hidden="true">
+      <symbol id="i-prediccion" viewBox="0 0 20 20"><polygon points="6 4 17 10 6 16" /></symbol>
+      <symbol id="i-metadata" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.2" /><line x1="10" y1="9" x2="10" y2="14" /><line x1="10" y1="6.2" x2="10" y2="6.3" /></symbol>
+      <symbol id="i-latencia" viewBox="0 0 20 20"><circle cx="10" cy="10.6" r="6.8" /><polyline points="10 6.8 10 10.6 12.8 12.2" /><line x1="7.6" y1="2.2" x2="12.4" y2="2.2" /></symbol>
+      <symbol id="i-lote" viewBox="0 0 20 20"><rect x="2.8" y="3.6" width="14.4" height="12.8" rx="1.8" /><line x1="2.8" y1="8" x2="17.2" y2="8" /><line x1="2.8" y1="12" x2="17.2" y2="12" /></symbol>
+      <symbol id="i-seguridad" viewBox="0 0 20 20"><rect x="4.2" y="8.8" width="11.6" height="8.4" rx="1.8" /><path d="M7 8.8V6.6a3 3 0 0 1 6 0v2.2" /></symbol>
+    </svg>
+
     <header>
       <div>
         <h1>Predictor de ACV</h1>
@@ -136,8 +219,32 @@ onMounted(async () => {
       </div>
     </header>
 
-    <!-- 1. Un paciente, los tres protocolos -->
-    <div class="columnas">
+    <div class="cuerpo" :class="{ plegada: !barraAbierta }">
+      <aside class="lateral">
+        <button
+          class="tirador"
+          :title="barraAbierta ? 'Ocultar el menú' : 'Mostrar el menú'"
+          @click="barraAbierta = !barraAbierta"
+        >☰</button>
+        <nav>
+          <button
+            v-for="s in SECCIONES"
+            :key="s.id"
+            :class="{ activo: s.id === seccion }"
+            :title="s.nombre"
+            @click="seccion = s.id"
+          >
+            <svg class="icono" aria-hidden="true"><use :href="'#i-' + s.id" /></svg>
+            <span class="rotulo">
+              <b>{{ s.nombre }}</b>
+              <span>{{ s.nota }}</span>
+            </span>
+          </button>
+        </nav>
+      </aside>
+
+      <div class="contenido">
+    <div v-if="seccion === 'prediccion'" class="columnas">
       <section class="panel">
         <h2>Paciente</h2>
         <div class="tabs">
@@ -204,8 +311,7 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- 2. La lectura de metadata: REST contra GraphQL -->
-    <section class="panel ancha">
+    <section v-if="seccion === 'metadata'" class="panel ancha">
       <h2>Leer la metadata del modelo · REST contra GraphQL</h2>
       <p class="detalle">
         La misma lectura por los dos protocolos. Elegí qué campos querés: REST manda todo
@@ -241,13 +347,13 @@ onMounted(async () => {
       </p>
     </section>
 
-    <!-- 3. Latencia de los tres -->
-    <section class="panel ancha">
+    <section v-if="seccion === 'latencia'" class="panel ancha">
       <h2>Latencia de los tres · la misma predicción, {{ vueltas }} veces cada uno</h2>
       <p class="detalle">
         Medido como en el mini-TP 3: las {{ vueltas }} llamadas de un protocolo seguidas, y
         el promedio por llamada. La primera de cada bloque no se cuenta, porque paga el
-        arranque (GraphQL arma el esquema, gRPC abre el canal).
+        arranque (GraphQL arma el esquema, gRPC abre el canal). Paciente:
+        <b>{{ paciente.nombre }}</b>.
       </p>
 
       <div class="controles">
@@ -277,8 +383,7 @@ onMounted(async () => {
       </p>
     </section>
 
-    <!-- 4. El segundo rpc del .proto -->
-    <section class="panel ancha">
+    <section v-if="seccion === 'lote'" class="panel ancha">
       <h2>Un lote por server-streaming · solo gRPC</h2>
       <p class="detalle">
         El <code>.proto</code> tiene un segundo método, <code>PredecirLote</code>, que
@@ -304,6 +409,98 @@ onMounted(async () => {
         </tbody>
       </table>
     </section>
+    <section v-if="seccion === 'seguridad'" class="panel ancha">
+      <h2>Seguridad · la puerta protegida</h2>
+      <p class="detalle">
+        <code>POST /v1/secure/predict</code> — el mismo modelo detrás de un token con rol,
+        un límite de 5 consultas por minuto y auditoría de cada predicción.
+        <code>/v1/predict</code> queda abierto y sin tocar.
+      </p>
+
+      <div class="controles">
+        <div class="tabs">
+          <button
+            v-for="r in ROLES"
+            :key="r"
+            :class="{ activo: r === rolElegido }"
+            @click="rolElegido = r"
+          >{{ r }}</button>
+        </div>
+        <button @click="pedirToken">pedir token</button>
+      </div>
+
+      <p v-if="token" class="token">
+        <code>{{ token.token.slice(0, 44) }}…</code>
+        <span>vence en {{ token.expira_en / 60 }} min</span>
+      </p>
+
+      <table class="barras">
+        <tbody>
+          <tr v-for="c in CASOS" :key="c.id">
+            <td>
+              <button :disabled="esperandoSeguro[c.id]" @click="probar(c)">probar</button>
+            </td>
+            <td>{{ c.etiqueta }}</td>
+            <td v-if="seguro[c.id]">
+              <span class="codigo" :class="{ mal: codigo(seguro[c.id]) >= 400 }">
+                {{ codigo(seguro[c.id]) }}
+              </span>
+            </td>
+            <td v-else class="gris">espera {{ c.espera }}</td>
+            <td>
+              <template v-if="seguro[c.id]">
+                <span v-if="seguro[c.id].ok" class="prob">
+                  {{ seguro[c.id].resultado.probabilidad }}
+                  &nbsp;v{{ seguro[c.id].resultado.version_modelo }}
+                </span>
+                <span v-else>
+                  {{ seguro[c.id].detalle.map((d) => (d.campo ? d.campo + ": " : "") + d.mensaje).join(" · ") }}
+                </span>
+              </template>
+            </td>
+          </tr>
+
+          <tr>
+            <td>
+              <button :disabled="esperandoSeguro.rafaga" @click="golpear">probar</button>
+            </td>
+            <td>6 en un minuto</td>
+            <td v-if="rafaga">
+              <span class="codigo mal">429</span>
+            </td>
+            <td v-else class="gris">espera 429</td>
+            <td>
+              <span v-for="(c, i) in rafaga" :key="i" class="codigo" :class="{ mal: c >= 400 }">
+                {{ c }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="controles" style="margin-top:1.1rem">
+        <button @click="verAuditoria">ver la auditoría</button>
+        <span class="detalle" style="margin:0">solo el rol <code>admin</code> puede leerla</span>
+      </div>
+
+      <table v-if="auditoria?.length" class="barras">
+        <thead><tr><th>hora</th><th>usuario</th><th>huella de la consulta</th><th>pred</th><th>modelo</th></tr></thead>
+        <tbody>
+          <tr v-for="(a, i) in auditoria" :key="i">
+            <td>{{ a.ts.slice(11, 19) }}</td>
+            <td>{{ a.usuario }}</td>
+            <td><code>{{ a.hash_entrada.slice(0, 16) }}…</code></td>
+            <td>{{ a.prediccion }}</td>
+            <td>v{{ a.version_modelo }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="auditoria" class="nota">
+        se guarda la huella de la consulta, no los datos del paciente
+      </p>
+    </section>
+      </div>
+    </div>
   </main>
 </template>
 
@@ -324,14 +521,72 @@ onMounted(async () => {
 
 body {
   margin: 0;
+  height: 100vh;
+  overflow: hidden;
   background: var(--fondo);
   color: var(--texto);
   font: 16px/1.5 system-ui, sans-serif;
 }
 
-main { max-width: 1240px; margin: 0 auto; padding: 2rem 1.2rem 5rem; }
+/* El encabezado y la lateral quedan fijos; el scroll vive adentro del contenido. */
+main { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
 
-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.cuerpo {
+  display: grid; grid-template-columns: 230px 1fr; min-height: 0;
+  /* El navegador interpola grid-template-columns, asi que el plegado no salta. */
+  transition: grid-template-columns .22s ease;
+}
+.cuerpo.plegada { grid-template-columns: 3.9rem 1fr; }
+
+.contenido { overflow-y: auto; min-height: 0; padding: 1.3rem 1.5rem 4rem; }
+/* Para que en una pantalla muy ancha el contenido no se estire de punta a punta. */
+.contenido > * { max-width: 1240px; }
+
+.lateral {
+  display: grid; gap: .5rem; align-content: start;
+  overflow: hidden auto; min-height: 0;
+  padding: 1.3rem .9rem;
+  border-right: 1px solid var(--borde);
+  transition: padding .22s ease;
+}
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.lateral nav { display: grid; gap: .4rem; }
+/* Mismo boton y mismo lugar este abierta o plegada: solo cambia lo que abre. */
+.tirador {
+  justify-self: start; width: 2.4rem; padding: .4rem 0;
+  background: transparent; border: 1px solid var(--borde);
+  color: var(--gris); font-weight: 400; font-size: 1.05rem; line-height: 1;
+}
+.tirador:hover { color: var(--texto); border-color: var(--acento); }
+
+/* Plegada quedan solo los iconos: el rotulo se desvanece pero sigue en el DOM,
+   asi se puede animar y el lector de pantalla lo sigue leyendo. */
+.cuerpo.plegada .lateral { padding: 1.3rem .7rem; }
+.cuerpo.plegada .lateral nav button { padding: .6rem; }
+.cuerpo.plegada .rotulo { opacity: 0; }
+
+.lateral nav button {
+  display: flex; align-items: center; gap: .6rem; overflow: hidden;
+  text-align: left; padding: .6rem .8rem; font-weight: 400;
+  background: var(--panel); border: 1px solid var(--borde); color: var(--texto);
+  transition: padding .22s ease;
+}
+.icono {
+  width: 1.15rem; height: 1.15rem; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.rotulo { display: grid; gap: .1rem; min-width: 0; transition: opacity .18s ease; }
+.lateral nav button b { font-weight: 600; font-size: .95rem; }
+.lateral nav button .rotulo span { color: var(--gris); font-size: .78rem; }
+.lateral nav button.activo { border-color: var(--acento); background: #15304c; color: var(--acento); }
+
+header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; flex-wrap: wrap;
+  padding: 1.1rem 1.5rem;
+  border-bottom: 1px solid var(--borde);
+}
 h1 { margin: 0; font-size: 2rem; }
 .sub { margin: .3rem 0 0; color: var(--gris); }
 
@@ -342,11 +597,10 @@ h1 { margin: 0; font-size: 2rem; }
 }
 .chapa b { color: var(--acento); font-size: 1.05rem; }
 
-.columnas { display: grid; grid-template-columns: 360px 1fr; gap: 1.1rem; margin-top: 1.8rem; align-items: start; }
+.columnas { display: grid; grid-template-columns: 340px 1fr; gap: 1.1rem; align-items: start; }
 .protocolos { display: grid; gap: 1.1rem; }
 
 .panel { background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; padding: 1.1rem 1.3rem; }
-.panel.ancha { margin-top: 1.1rem; }
 .panel h2 { margin: 0 0 .3rem; font-size: 1.12rem; color: var(--acento); }
 .panel h3 { margin: 0 0 .6rem; font-size: .9rem; color: var(--gris); text-transform: uppercase; letter-spacing: .05em; }
 
@@ -410,7 +664,28 @@ button {
 button:disabled { opacity: .5; cursor: default; }
 button.ancho { width: 100%; margin-top: 1.1rem; }
 
-@media (max-width: 1000px) {
-  .columnas, .duelo { grid-template-columns: 1fr; }
+.token { margin: 0 0 1rem; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+.token code { background: #0d1218; padding: .35rem .6rem; border-radius: 6px; font-size: .82rem; }
+.token span { color: var(--gris); font-size: .86rem; }
+
+.codigo {
+  display: inline-block; min-width: 2.6rem; margin-right: .3rem; padding: .1rem .45rem;
+  border-radius: 5px; background: #14301f; color: var(--bien);
+  font-variant-numeric: tabular-nums; font-size: .88rem; text-align: center;
+}
+.codigo.mal { background: #3a1a1e; color: var(--mal); }
+.gris { color: var(--gris); font-size: .88rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cuerpo, .lateral, .lateral nav button, .rotulo { transition: none; }
+}
+
+@media (max-width: 1100px) {
+  body, main { height: auto; overflow: visible; }
+  .cuerpo, .cuerpo.plegada, .columnas, .duelo { grid-template-columns: 1fr; }
+  .lateral, .cuerpo.plegada .lateral { border-right: 0; border-bottom: 1px solid var(--borde); overflow: visible; padding: 1.3rem .9rem; }
+  .cuerpo.plegada .rotulo { opacity: 1; }
+  .cuerpo.plegada .lateral nav button { padding: .6rem .8rem; }
+  .contenido { overflow: visible; }
 }
 </style>

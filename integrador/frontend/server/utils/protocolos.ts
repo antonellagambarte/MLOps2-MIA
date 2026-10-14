@@ -28,6 +28,13 @@ const CODIGOS: Record<number, string> = {
   14: "UNAVAILABLE",
 }
 
+export function detalleHttp(e: any) {
+  return Array.isArray(e.data?.detail)
+    ? e.data.detail.map((d: any) => ({ campo: d.loc.slice(1).join("."), mensaje: d.msg }))
+    : [{ campo: "", mensaje: e.data?.detail ?? String(e) }]
+}
+
+
 function partir(mensaje: string, separadorDeCampo: string) {
   return mensaje.split("; ").map((t) => {
     const [campo, ...resto] = t.split(separadorDeCampo)
@@ -43,10 +50,7 @@ export async function porRest(paciente: Record<string, any>) {
     return { ok: true, ms: performance.now() - empezo, resultado }
   } catch (e: any) {
     const ms = performance.now() - empezo
-    const detalle = Array.isArray(e.data?.detail)
-      ? e.data.detail.map((d: any) => ({ campo: d.loc.slice(1).join("."), mensaje: d.msg }))
-      : [{ campo: "", mensaje: e.data?.detail ?? String(e) }]
-    return { ok: false, ms, status: `HTTP ${e.status ?? 0}`, detalle }
+    return { ok: false, ms, status: `HTTP ${e.status ?? 0}`, detalle: detalleHttp(e) }
   }
 }
 
