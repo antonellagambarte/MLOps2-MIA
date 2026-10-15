@@ -119,21 +119,32 @@ const SECCIONES = [
 const seccion = ref("prediccion")
 const barraAbierta = ref(true)
 
-const ROLES = ["analista", "admin", "invitado"]
-
-// Cada caso es un control distinto. "elegido" usa el rol de los botones de arriba.
+// Un caso por control, en el orden en que la API los aplica: el de mas afuera gana.
+// Por eso "invitado + age 150" daria 403 y no 422, y por eso la rafaga con un rol sin
+// permiso daria 403 seis veces en vez de 429: el limite depende de haber pasado el rol.
 const CASOS = [
-  { id: "sinToken", etiqueta: "sin token", espera: 401, rol: null, roto: false },
-  { id: "rolMalo", etiqueta: "rol invitado", espera: 403, rol: "invitado", roto: false },
-  { id: "invalido", etiqueta: "age: 150", espera: 422, rol: "elegido", roto: true },
-  { id: "conToken", etiqueta: "con token", espera: 200, rol: "elegido", roto: false },
+  {
+    id: "sinToken", etiqueta: "sin token", rol: null, roto: false, espera: 401,
+    freno: "autenticación — no pasa la primera puerta",
+  },
+  {
+    id: "rolMalo", etiqueta: "token con rol invitado", rol: "invitado", roto: false, espera: 403,
+    freno: "autorización — pasa autenticación, falla el rol",
+  },
+  {
+    id: "invalido", etiqueta: "analista + age: 150", rol: "analista", roto: true, espera: 422,
+    freno: "validación — pasa autenticación y rol, falla el contrato",
+  },
+  {
+    id: "conToken", etiqueta: "analista + paciente válido", rol: "analista", roto: false, espera: 200,
+    freno: "pasa los tres",
+  },
 ]
 
-const rolElegido = ref("analista")
-const token = ref(null)
 const seguro = ref({})
 const rafaga = ref(null)
 const auditoria = ref(null)
+const rechazoAuditoria = ref(null)
 const esperandoSeguro = ref({})
 
 function codigo(respuesta) {
@@ -167,15 +178,10 @@ async function predecirSeguro(jwt, paciente) {
   }
 }
 
-async function pedirToken() {
-  token.value = await emitirToken(rolElegido.value)
-}
-
 async function probar(caso) {
   esperandoSeguro.value = { ...esperandoSeguro.value, [caso.id]: true }
   try {
-    const rol = caso.rol === "elegido" ? rolElegido.value : caso.rol
-    const emitido = rol ? await emitirToken(rol) : null
+    const emitido = caso.rol ? await emitirToken(caso.rol) : null
     const paciente = (caso.roto ? INVALIDO : PACIENTES[0]).datos
     seguro.value = {
       ...seguro.value,
@@ -186,13 +192,17 @@ async function probar(caso) {
   }
 }
 
+async function correrTodos() {
+  for (const caso of CASOS) await probar(caso)
+}
+
 async function golpear() {
   esperandoSeguro.value = { ...esperandoSeguro.value, rafaga: true }
   rafaga.value = null
   try {
     // Usuario aparte: el limite es por usuario, asi la rafaga no consume el de los otros
     // casos. Un solo token para las seis: lo que se mide es el limite, no la emision.
-    const emitido = await emitirToken(rolElegido.value, "rafaga")
+    const emitido = await emitirToken("analista", "rafaga")
 
     const codigos = []
     for (let intento = 0; intento < 6; intento++) {
@@ -204,11 +214,23 @@ async function golpear() {
   }
 }
 
-async function verAuditoria() {
-  const emitido = await emitirToken("admin")
-  auditoria.value = await $fetch(`${apiPublica}/v1/secure/auditoria`, {
-    headers: { Authorization: `Bearer ${emitido.token}` },
-  })
+// Con admin trae los registros; con analista tiene que dar 403. Son dos botones para
+// que el control se pueda comprobar, no solo leer en un cartel.
+async function verAuditoria(rol) {
+  const emitido = await emitirToken(rol, "auditoria")
+  try {
+    auditoria.value = await $fetch(`${apiPublica}/v1/secure/auditoria`, {
+      headers: { Authorization: `Bearer ${emitido.token}` },
+    })
+    rechazoAuditoria.value = null
+  } catch (error) {
+    auditoria.value = null
+    rechazoAuditoria.value = {
+      rol,
+      status: `HTTP ${error.status ?? 0}`,
+      mensaje: error.data?.detail ?? String(error),
+    }
+  }
 }
 
 watch(elegido, () => { resultados.value = {} })
@@ -415,21 +437,8 @@ onMounted(async () => {
       </p>
 
       <div class="controles">
-        <div class="tabs">
-          <button
-            v-for="rol in ROLES"
-            :key="rol"
-            :class="{ activo: rol === rolElegido }"
-            @click="rolElegido = rol"
-          >{{ rol }}</button>
-        </div>
-        <button @click="pedirToken">pedir token</button>
+        <button @click="correrTodos">correr los cuatro controles</button>
       </div>
-
-      <p v-if="token" class="token">
-        <code>{{ token.token.slice(0, 44) }}…</code>
-        <span>vence en {{ token.expira_en / 60 }} min</span>
-      </p>
 
       <table class="barras">
         <tbody>
@@ -457,13 +466,14 @@ onMounted(async () => {
                 </span>
               </template>
             </td>
+            <td class="gris">{{ caso.freno }}</td>
           </tr>
 
           <tr>
             <td>
               <button :disabled="esperandoSeguro.rafaga" @click="golpear">probar</button>
             </td>
-            <td>6 en un minuto</td>
+            <td>analista, 6 en un minuto</td>
             <td v-if="rafaga">
               <span class="codigo mal">429</span>
             </td>
@@ -476,14 +486,22 @@ onMounted(async () => {
                 :class="{ mal: codigoHttp >= 400 }"
               >{{ codigoHttp }}</span>
             </td>
+            <td class="gris">límite de tasa — pasa los tres, pero no tantas veces</td>
           </tr>
         </tbody>
       </table>
 
-      <div class="controles" style="margin-top:1.1rem">
-        <button @click="verAuditoria">ver la auditoría</button>
-        <span class="detalle" style="margin:0">solo el rol <code>admin</code> puede leerla</span>
+      <h3 style="margin:1.8rem 0 .5rem; font-size:1rem">Auditoría</h3>
+      <div class="controles">
+        <button @click="verAuditoria('admin')">leer como admin</button>
+        <button @click="verAuditoria('analista')">leer como analista</button>
       </div>
+
+      <p v-if="rechazoAuditoria" class="nota">
+        rol <code>{{ rechazoAuditoria.rol }}</code> ·
+        <span class="codigo mal">{{ rechazoAuditoria.status }}</span>
+        {{ rechazoAuditoria.mensaje }}
+      </p>
 
       <table v-if="auditoria?.length" class="barras">
         <thead><tr><th>hora</th><th>usuario</th><th>huella de la consulta</th><th>pred</th><th>modelo</th></tr></thead>
@@ -654,10 +672,6 @@ button {
 }
 button:disabled { opacity: .5; cursor: default; }
 button.ancho { width: 100%; margin-top: 1.1rem; }
-
-.token { margin: 0 0 1rem; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
-.token code { background: #0d1218; padding: .35rem .6rem; border-radius: 6px; font-size: .82rem; }
-.token span { color: var(--gris); font-size: .86rem; }
 
 .codigo {
   display: inline-block; min-width: 2.6rem; margin-right: .3rem; padding: .1rem .45rem;
