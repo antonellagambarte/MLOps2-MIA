@@ -312,6 +312,8 @@ services:
     environment:
       NUXT_API_BASE: http://fastapi:8800
       NUXT_GRPC_TARGET: grpc:50051
+      # La que viaja al navegador: tiene que ser alcanzable desde la maquina.
+      NUXT_PUBLIC_API_PUBLICA: http://localhost:${API_HOST_PORT}
       NUXT_API_KEY_TOKENS: ${API_KEY_TOKENS}
       # Sin esto, en Windows el watcher no ve los archivos nuevos del servidor.
       CHOKIDAR_USEPOLLING: "true"

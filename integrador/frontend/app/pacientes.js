@@ -28,6 +28,7 @@ export const PACIENTES = [
   },
   {
     nombre: "Inválido",
+    invalido: true,
     detalle: "Edad 150, un trabajo inventado y glucosa negativa: REST y GraphQL tienen que rechazarlo igual",
     datos: {
       gender: "Female", age: 150, hypertension: 0, heart_disease: 1,

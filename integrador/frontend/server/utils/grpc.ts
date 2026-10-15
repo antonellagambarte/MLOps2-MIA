@@ -1,6 +1,14 @@
 import { credentials, loadPackageDefinition } from "@grpc/grpc-js"
 import { loadSync } from "@grpc/proto-loader"
 
+// Los dos que emite grpc_service/server.py, mas UNKNOWN, que es como llega una
+// excepcion no atrapada del servicio.
+export const CODIGOS_GRPC: Record<number, string> = {
+  2: "UNKNOWN",
+  3: "INVALID_ARGUMENT",
+  14: "UNAVAILABLE",
+}
+
 // La misma tabla que grpc_service/mapas.py, al revés: texto -> enum del .proto.
 const ENUMS: Record<string, Record<string, string>> = {
   gender: {

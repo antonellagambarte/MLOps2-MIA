@@ -16,10 +16,16 @@ export default defineEventHandler(async (event) => {
   const empezoTodo = performance.now()
 
   for (const id of ORDEN) {
-    await CLIENTES[id](paciente)
+    const control: any = await CLIENTES[id](paciente)
+    if (!control.ok) {
+      throw createError({
+        statusCode: 400,
+        statusMessage: `La carrera necesita un paciente valido: ${id} lo rechazo`,
+      })
+    }
 
     const empezo = performance.now()
-    for (let i = 0; i < vueltas; i++) await CLIENTES[id](paciente)
+    for (let vuelta = 0; vuelta < vueltas; vuelta++) await CLIENTES[id](paciente)
     medias[id] = (performance.now() - empezo) / vueltas
   }
 
