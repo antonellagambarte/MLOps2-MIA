@@ -5,7 +5,10 @@ Sirve dos protocolos sobre el mismo modelo: REST para predecir y GraphQL para
 consultar metadatos y también predecir. El modelo lo carga y lo mantiene al día
 el módulo modelo.py, que los dos comparten.
 """
+import os
+
 from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel
 from strawberry.fastapi import GraphQLRouter
@@ -16,6 +19,16 @@ from esquema_graphql import schema as schema_graphql
 from seguridad import router as router_seguridad
 
 app = FastAPI(title="Predictor de accidente cerebrovascular")
+
+# El navegador le pega directo a REST y a GraphQL, y eso cruza de origen: la pagina
+# viene del puerto 3000 y la API escucha en el 8800. Se habilita solo ese origen; con
+# "*" cualquier sitio podria consultar el modelo desde el navegador de quien lo visite.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("ORIGENES_PERMITIDOS", "http://localhost:3000").split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
 
 def estado_cargado():
