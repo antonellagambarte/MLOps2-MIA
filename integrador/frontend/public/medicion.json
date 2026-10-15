@@ -1,0 +1,26 @@
+{
+  "fecha": "2026-10-14T23:23:10",
+  "desde": "esta máquina, contra localhost",
+  "vueltas": 1000,
+  "coinciden": true,
+  "resumen": [
+    {
+      "id": "rest",
+      "ms": 21.07619519999571,
+      "probabilidad": 0.5005481839179993,
+      "veces": 1.2818617764139613
+    },
+    {
+      "id": "graphql",
+      "ms": 25.623802699999942,
+      "probabilidad": 0.5005481839179993,
+      "veces": 1.5584489010383369
+    },
+    {
+      "id": "grpc",
+      "ms": 16.441862600004242,
+      "probabilidad": 0.5005481839179993,
+      "veces": 1.0
+    }
+  ]
+}

@@ -86,25 +86,12 @@ async function predecirTodos() {
   for (const protocolo of PROTOCOLOS) await predecir(protocolo.id)
 }
 
-const vueltas = ref(200)   // el mismo n que el notebook: con menos, el numero baila
-const carrera = ref(null)
-const corriendo = ref(false)
+const desdeLaMaquina = ref(null)
 
-async function correrCarrera() {
-  corriendo.value = true
-  carrera.value = null
-  try {
-    carrera.value = await $fetch("/api/carrera", {
-      method: "POST",
-      body: { n: vueltas.value, paciente: paciente.value.datos },
-    })
-  } finally {
-    corriendo.value = false
-  }
-}
-
-const peor = computed(() =>
-  carrera.value ? Math.max(...carrera.value.resumen.map((medicion) => medicion.ms)) : 1,
+const peorDelScript = computed(() =>
+  desdeLaMaquina.value
+    ? Math.max(...desdeLaMaquina.value.resumen.map((medicion) => medicion.ms))
+    : 1,
 )
 
 const lote = ref(null)
@@ -124,7 +111,7 @@ async function enviarLote() {
 
 const SECCIONES = [
   { id: "prediccion", nombre: "Predicción", nota: "REST · GraphQL · gRPC" },
-  { id: "latencia", nombre: "Latencia", nota: "los tres, 200 veces" },
+  { id: "latencia", nombre: "Latencia", nota: "" },
   { id: "lote", nombre: "Lote", nota: "server-streaming, solo gRPC" },
   { id: "seguridad", nombre: "Seguridad", nota: "token, límite y auditoría" },
 ]
@@ -231,6 +218,11 @@ onMounted(async () => {
     modelo.value = await $fetch("/api/health")
   } catch {
     modelo.value = null
+  }
+  try {
+    desdeLaMaquina.value = await $fetch("/medicion.json")
+  } catch {
+    desdeLaMaquina.value = null
   }
 })
 </script>
@@ -353,43 +345,39 @@ onMounted(async () => {
     </div>
 
     <section v-if="seccion === 'latencia'" class="panel ancha">
-      <h2>Latencia de los tres · la misma predicción, {{ vueltas }} veces cada uno</h2>
+      <h2>Latencia de los tres</h2>
       <p class="detalle">
-        Medido como en el mini-TP 3: las {{ vueltas }} llamadas de un protocolo seguidas, y
-        el promedio por llamada. La primera de cada bloque no se cuenta, porque paga el
-        arranque (GraphQL arma el esquema, gRPC abre el canal). Paciente:
-        <b>{{ paciente.nombre }}</b>.
+        La mide <code>comparar.py</code> desde la máquina, contra <code>localhost</code>:
+        un bloque de llamadas por protocolo y el promedio por llamada, descartando la
+        primera de cada bloque.
       </p>
 
-      <p v-if="paciente.invalido" class="nota">
-        Con el paciente inválido no se puede medir: las llamadas se rechazan antes de
-        llegar al modelo, así que los tiempos no dirían nada. Elegí otro paciente.
-      </p>
+      <template v-if="desdeLaMaquina">
+        <table class="barras">
+          <thead>
+            <tr><th>protocolo</th><th>ms por llamada</th><th>contra gRPC</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="medicion in desdeLaMaquina.resumen" :key="medicion.id">
+              <td><b>{{ medicion.id }}</b></td>
+              <td>{{ medicion.ms.toFixed(3) }} ms</td>
+              <td>{{ medicion.veces.toFixed(2) }}×</td>
+              <td class="pista">
+                <span class="barra" :style="{ width: (medicion.ms / peorDelScript * 100) + '%' }"></span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="nota">
+          {{ desdeLaMaquina.vueltas }} llamadas por protocolo, el
+          {{ desdeLaMaquina.fecha.slice(8, 10) }}/{{ desdeLaMaquina.fecha.slice(5, 7) }} a las
+          {{ desdeLaMaquina.fecha.slice(11, 16) }}. Los tres devolvieron
+          {{ desdeLaMaquina.coinciden ? "la misma probabilidad" : "probabilidades distintas" }}.
+        </p>
+      </template>
 
-      <div class="controles">
-        <label>vueltas <input v-model.number="vueltas" type="number" min="5" max="200" step="5"></label>
-        <button :disabled="corriendo || paciente.invalido" @click="correrCarrera">
-          {{ corriendo ? "corriendo…" : "correr" }}
-        </button>
-      </div>
-
-      <table v-if="carrera" class="barras">
-        <thead>
-          <tr><th>protocolo</th><th>ms por llamada</th><th>contra gRPC</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="medicion in carrera.resumen" :key="medicion.id">
-            <td><b>{{ medicion.id }}</b></td>
-            <td>{{ medicion.ms.toFixed(3) }} ms</td>
-            <td>{{ medicion.veces.toFixed(2) }}×</td>
-            <td class="pista">
-              <span class="barra" :style="{ width: (medicion.ms / peor * 100) + '%' }"></span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="carrera" class="nota">
-        {{ carrera.vueltas }} vueltas × 3 protocolos en {{ (carrera.total / 1000).toFixed(1) }} s
+      <p v-else class="nota">
+        Todavía no se corrió <code>python comparar.py</code>.
       </p>
     </section>
 

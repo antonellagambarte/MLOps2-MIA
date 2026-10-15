@@ -1,4 +1,4 @@
-import { partir, porGraphql, porRest } from "#shared/protocolos"
+import { partir } from "#shared/protocolos"
 import { aCaso, CODIGOS_GRPC, predecirUnary } from "./grpc"
 
 // Los clientes de REST y GraphQL estan en shared/protocolos.ts porque el navegador
@@ -35,11 +35,4 @@ export async function porGrpc(paciente: Record<string, any>) {
       descripcion: salida.descripcion,
     },
   }
-}
-
-// Los tres medidos desde el mismo lugar, que es lo que hace comparable a la carrera.
-export const CLIENTES: Record<string, (paciente: Record<string, any>) => Promise<any>> = {
-  rest: (paciente) => porRest(useRuntimeConfig().apiBase, paciente),
-  graphql: (paciente) => porGraphql(useRuntimeConfig().apiBase, paciente),
-  grpc: porGrpc,
 }
