@@ -5,6 +5,10 @@ __pycache__/
 integrador/airflow/logs/*
 !integrador/airflow/logs/.gitkeep
 
+# Los stubs del .proto se regeneran, no se versionan
+integrador/notebooks/scoring_pb2*.py
+.ipynb_checkpoints/
+
 # Lo que genera Nuxt: se reinstala y se reconstruye
 integrador/frontend/node_modules/
 integrador/frontend/.nuxt/

@@ -14,8 +14,8 @@ const PROTOCOLOS = [
   {
     id: "graphql",
     nombre: "GraphQL",
-    nota: "mutation predecir · Strawberry, en el mismo proceso que REST",
-    rechazo: "responde HTTP 200 y pone el rechazo en errors[] — así funciona GraphQL",
+    nota: "mutation predecir",
+    rechazo: "responde HTTP 200 y pone el rechazo en errors[]",
   },
   {
     id: "grpc",
@@ -112,7 +112,7 @@ async function enviarLote() {
 const SECCIONES = [
   { id: "prediccion", nombre: "Predicción", nota: "REST · GraphQL · gRPC" },
   { id: "latencia", nombre: "Latencia", nota: "" },
-  { id: "lote", nombre: "Lote", nota: "server-streaming, solo gRPC" },
+  { id: "lote", nombre: "Lote", nota: "PredecirLote gRPC" },
   { id: "seguridad", nombre: "Seguridad", nota: "token, límite y auditoría" },
 ]
 
@@ -239,7 +239,6 @@ onMounted(async () => {
     <header>
       <div>
         <h1>Predictor de ACV</h1>
-        <p class="sub">Un modelo, cuatro protocolos — cliente de prueba de la plataforma</p>
       </div>
       <div v-if="modelo" class="chapa">
         <span>champion</span>
@@ -337,7 +336,7 @@ onMounted(async () => {
                 :key="aviso"
                 class="nota imposible"
               >{{ aviso }}</p>
-              <p class="nota">{{ protocolo.rechazo }} · {{ resultados[protocolo.id].ms.toFixed(1) }} ms</p>
+              <p class="nota">{{ protocolo.rechazo }}</p>
             </div>
           </template>
         </section>
@@ -382,11 +381,11 @@ onMounted(async () => {
     </section>
 
     <section v-if="seccion === 'lote'" class="panel ancha">
-      <h2>Un lote por server-streaming · solo gRPC</h2>
+      <h2>Un lote por server-streaming · gRPC</h2>
       <p class="detalle">
         El <code>.proto</code> tiene un segundo método, <code>PredecirLote</code>, que
         devuelve <code>stream Prediccion</code>: las respuestas salen de a una mientras el
-        servidor las calcula, sin esperar a que termine el lote. Ni REST ni GraphQL hacen esto.
+        servidor las calcula, sin esperar a que termine el lote.
       </p>
 
       <button :disabled="enviandoLote" @click="enviarLote">
