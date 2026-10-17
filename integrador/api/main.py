@@ -1,11 +1,11 @@
 """
-API de predicción de accidente cerebrovascular (adaptado de mini-TP1)
-
-Sirve dos protocolos sobre el mismo modelo: REST para predecir y GraphQL para
-consultar metadatos y también predecir. El modelo lo carga y lo mantiene al día
-el módulo modelo.py, que los dos comparten.
+API de predicción de accidente cerebrovascular.
+REST para predecir y GraphQL para consultar metadatos y también predecir. 
 """
+import os
+
 from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from mlflow.tracking import MlflowClient
 from pydantic import BaseModel
 from strawberry.fastapi import GraphQLRouter
@@ -16,6 +16,13 @@ from esquema_graphql import schema as schema_graphql
 from seguridad import router as router_seguridad
 
 app = FastAPI(title="Predictor de accidente cerebrovascular")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv("ORIGENES_PERMITIDOS", "http://localhost:3000").split(","),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
+)
 
 
 def estado_cargado():
@@ -82,7 +89,7 @@ def metricas_modelo():
 
 @router_v1.post("/predict", response_model=Prediccion)
 def predecir(paciente: Caracteristicas):
-    estado_cargado()   # 503 si todavia no hay modelo
+    estado_cargado()
 
     try:
         clase, probabilidad, version, descripcion = modelo.predecir(paciente.model_dump())

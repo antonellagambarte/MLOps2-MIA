@@ -1,7 +1,12 @@
 import { credentials, loadPackageDefinition } from "@grpc/grpc-js"
 import { loadSync } from "@grpc/proto-loader"
 
-// La misma tabla que grpc_service/mapas.py, al revés: texto -> enum del .proto.
+export const CODIGOS_GRPC: Record<number, string> = {
+  2: "UNKNOWN",
+  3: "INVALID_ARGUMENT",
+  14: "UNAVAILABLE",
+}
+
 const ENUMS: Record<string, Record<string, string>> = {
   gender: {
     Male: "GENERO_MALE",
@@ -33,19 +38,15 @@ const ENUMS: Record<string, Record<string, string>> = {
 
 let cliente: any = null
 
-// Una sola conexión para todo el proceso: abrirla por pedido agregaría el
-// handshake de HTTP/2 a cada medición de latencia.
 function conectar() {
   if (cliente) return cliente
   const { grpcTarget, protoPath } = useRuntimeConfig()
-  // keepCase para que Residence_type y avg_glucose_level no pasen a camelCase.
   const definicion = loadSync(protoPath, { keepCase: true, enums: String, defaults: true })
   const paquete: any = loadPackageDefinition(definicion)
   cliente = new paquete.scoring.Scoring(grpcTarget, credentials.createInsecure())
   return cliente
 }
 
-/** Traduce un paciente al mensaje del .proto. Devuelve también lo que no se pudo codificar. */
 export function aCaso(paciente: Record<string, any>) {
   const caso: Record<string, any> = {}
   const imposibles: string[] = []
@@ -53,7 +54,6 @@ export function aCaso(paciente: Record<string, any>) {
   for (const [campo, valor] of Object.entries(paciente)) {
     const tabla = ENUMS[campo]
     if (!tabla) {
-      // bmi ausente se omite: el servidor lo detecta con HasField.
       if (valor !== null) caso[campo] = valor
       continue
     }
@@ -61,7 +61,6 @@ export function aCaso(paciente: Record<string, any>) {
     if (enumerado) {
       caso[campo] = enumerado
     } else {
-      // No hay enum para ese valor: se omite y llega como 0, que validar() rechaza.
       imposibles.push(`${campo}: el .proto no define un enum para "${valor}"`)
     }
   }
@@ -69,7 +68,6 @@ export function aCaso(paciente: Record<string, any>) {
   return { caso, imposibles }
 }
 
-/** Predice un caso por el método unary. Devuelve la misma forma que REST y GraphQL. */
 export function predecirUnary(caso: Record<string, any>): Promise<any> {
   return new Promise((resolve) => {
     conectar().Predecir(caso, (error: any, rta: any) => {
@@ -79,7 +77,6 @@ export function predecirUnary(caso: Record<string, any>): Promise<any> {
   })
 }
 
-/** Manda un lote y resuelve cuando el servidor cerró el stream, anotando cuándo llegó cada uno. */
 export function predecirLote(casos: Record<string, any>[]): Promise<any> {
   return new Promise((resolve) => {
     const empezo = performance.now()

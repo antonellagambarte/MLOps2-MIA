@@ -1,5 +1,8 @@
 <script setup>
+import { detalleHttp, porGraphql, porRest } from "#shared/protocolos"
 import { PACIENTES } from "./pacientes"
+
+const INVALIDO = PACIENTES.find((caso) => caso.invalido)
 
 const PROTOCOLOS = [
   {
@@ -11,8 +14,8 @@ const PROTOCOLOS = [
   {
     id: "graphql",
     nombre: "GraphQL",
-    nota: "mutation predecir · Strawberry, en el mismo proceso que REST",
-    rechazo: "responde HTTP 200 y pone el rechazo en errors[] — así funciona GraphQL",
+    nota: "mutation predecir",
+    rechazo: "responde HTTP 200 y pone el rechazo en errors[]",
   },
   {
     id: "grpc",
@@ -22,8 +25,6 @@ const PROTOCOLOS = [
   },
 ]
 
-const CAMPOS_META = ["name", "version", "auc", "accuracy", "f1", "precision", "recall"]
-
 const elegido = ref(0)
 const paciente = computed(() => PACIENTES[elegido.value])
 
@@ -31,26 +32,47 @@ const modelo = ref(null)
 const resultados = ref({})
 const esperando = ref({})
 
-// Las tres probabilidades tienen que ser el mismo número: es un modelo, no tres.
 const coinciden = computed(() => {
-  const listos = PROTOCOLOS.map((p) => resultados.value[p.id]).filter((r) => r?.ok)
+  const listos = PROTOCOLOS
+    .map((protocolo) => resultados.value[protocolo.id])
+    .filter((respuesta) => respuesta?.ok)
   if (listos.length < PROTOCOLOS.length) return null
-  const probabilidades = new Set(listos.map((r) => r.resultado.probabilidad))
+  const probabilidades = new Set(listos.map((respuesta) => respuesta.resultado.probabilidad))
   return probabilidades.size === 1 ? listos[0].resultado.probabilidad : null
 })
+
+
+const { apiPublica } = useRuntimeConfig().public
+
+function llamar(id, paciente) {
+  if (id === "rest") return porRest(apiPublica, paciente)
+  if (id === "graphql") return porGraphql(apiPublica, paciente)
+  return pedir("/api/grpc/predecir", { method: "POST", body: { paciente } })
+}
+
+async function pedir(ruta, opciones) {
+  try {
+    return await $fetch(ruta, opciones)
+  } catch (error) {
+    if (error.data) return error.data
+    return {
+      ok: false,
+      ms: 0,
+      status: `HTTP ${error.status ?? 0}`,
+      detalle: [{ campo: "", mensaje: String(error) }],
+    }
+  }
+}
 
 async function predecir(id) {
   esperando.value = { ...esperando.value, [id]: true }
   try {
-    const r = await $fetch(`/api/${id}/predecir`, {
-      method: "POST",
-      body: { paciente: paciente.value.datos },
-    })
-    resultados.value = { ...resultados.value, [id]: r }
-  } catch (e) {
+    const respuesta = await llamar(id, paciente.value.datos)
+    resultados.value = { ...resultados.value, [id]: respuesta }
+  } catch (error) {
     resultados.value = {
       ...resultados.value,
-      [id]: { ok: false, ms: 0, status: "error", detalle: [{ campo: "", mensaje: String(e) }] },
+      [id]: { ok: false, ms: 0, status: "error", detalle: [{ campo: "", mensaje: String(error) }] },
     }
   } finally {
     esperando.value = { ...esperando.value, [id]: false }
@@ -58,42 +80,15 @@ async function predecir(id) {
 }
 
 async function predecirTodos() {
-  for (const p of PROTOCOLOS) await predecir(p.id)
+  for (const protocolo of PROTOCOLOS) await predecir(protocolo.id)
 }
 
-const campos = ref(["version", "f1"])
-const meta = ref(null)
-const midiendoMeta = ref(false)
+const desdeLaMaquina = ref(null)
 
-async function compararMetadata() {
-  if (!campos.value.length) return
-  midiendoMeta.value = true
-  try {
-    meta.value = await $fetch("/api/metadata", { method: "POST", body: { campos: campos.value } })
-  } finally {
-    midiendoMeta.value = false
-  }
-}
-
-const vueltas = ref(200)   // el mismo n que el notebook: con menos, el numero baila
-const carrera = ref(null)
-const corriendo = ref(false)
-
-async function correrCarrera() {
-  corriendo.value = true
-  carrera.value = null
-  try {
-    carrera.value = await $fetch("/api/carrera", {
-      method: "POST",
-      body: { n: vueltas.value, paciente: paciente.value.datos },
-    })
-  } finally {
-    corriendo.value = false
-  }
-}
-
-const peor = computed(() =>
-  carrera.value ? Math.max(...carrera.value.resumen.map((r) => r.ms)) : 1,
+const peorDelScript = computed(() =>
+  desdeLaMaquina.value
+    ? Math.max(...desdeLaMaquina.value.resumen.map((medicion) => medicion.ms))
+    : 1,
 )
 
 const lote = ref(null)
@@ -103,9 +98,8 @@ async function enviarLote() {
   enviandoLote.value = true
   lote.value = null
   try {
-    // Solo los válidos: el inválido cortaría el stream a mitad de camino.
-    const pacientes = PACIENTES.slice(0, 3).map((p) => p.datos)
-    lote.value = await $fetch("/api/lote", { method: "POST", body: { pacientes } })
+    const pacientes = PACIENTES.slice(0, 3).map((caso) => caso.datos)
+    lote.value = await pedir("/api/lote", { method: "POST", body: { pacientes } })
   } finally {
     enviandoLote.value = false
   }
@@ -113,68 +107,93 @@ async function enviarLote() {
 
 const SECCIONES = [
   { id: "prediccion", nombre: "Predicción", nota: "REST · GraphQL · gRPC" },
-  { id: "metadata", nombre: "Metadata", nota: "REST contra GraphQL" },
-  { id: "latencia", nombre: "Latencia", nota: "los tres, 200 veces" },
-  { id: "lote", nombre: "Lote", nota: "server-streaming, solo gRPC" },
+  { id: "latencia", nombre: "Latencia", nota: "" },
+  { id: "lote", nombre: "Lote", nota: "PredecirLote gRPC" },
   { id: "seguridad", nombre: "Seguridad", nota: "token, límite y auditoría" },
 ]
 
 const seccion = ref("prediccion")
 const barraAbierta = ref(true)
 
-const ROLES = ["analista", "admin", "invitado"]
-
-// Cada caso es un control distinto. "elegido" usa el rol de los botones de arriba.
 const CASOS = [
-  { id: "sinToken", etiqueta: "sin token", espera: 401, rol: null, roto: false },
-  { id: "rolMalo", etiqueta: "rol invitado", espera: 403, rol: "invitado", roto: false },
-  { id: "invalido", etiqueta: "age: 150", espera: 422, rol: "elegido", roto: true },
-  { id: "conToken", etiqueta: "con token", espera: 200, rol: "elegido", roto: false },
+  {
+    id: "sinToken", etiqueta: "sin token", rol: null, roto: false, espera: 401,
+    freno: "autenticación — no pasa la primera puerta",
+  },
+  {
+    id: "rolMalo", etiqueta: "token con rol invitado", rol: "invitado", roto: false, espera: 403,
+    freno: "autorización — pasa autenticación, falla el rol",
+  },
+  {
+    id: "invalido", etiqueta: "analista + age: 150", rol: "analista", roto: true, espera: 422,
+    freno: "validación — pasa autenticación y rol, falla el contrato",
+  },
+  {
+    id: "conToken", etiqueta: "analista + paciente válido", rol: "analista", roto: false, espera: 200,
+    freno: "pasa los tres",
+  },
 ]
 
-const rolElegido = ref("analista")
-const token = ref(null)
 const seguro = ref({})
 const rafaga = ref(null)
 const auditoria = ref(null)
+const rechazoAuditoria = ref(null)
 const esperandoSeguro = ref({})
 
-function codigo(r) {
-  return r.ok ? 200 : Number(String(r.status).replace(/\D/g, "")) || 0
+function codigo(respuesta) {
+  return respuesta.ok ? 200 : Number(String(respuesta.status).replace(/\D/g, "")) || 0
 }
 
-async function pedirToken() {
-  token.value = await $fetch("/api/token", { method: "POST", body: { rol: rolElegido.value } })
+async function emitirToken(rol, usuario = "antonella") {
+  return await $fetch("/api/token", { method: "POST", body: { rol, usuario } })
+}
+
+async function predecirSeguro(jwt, paciente) {
+  const empezo = performance.now()
+  try {
+    const resultado = await $fetch(`${apiPublica}/v1/secure/predict`, {
+      method: "POST",
+      headers: jwt ? { Authorization: `Bearer ${jwt}` } : {},
+      body: paciente,
+    })
+    return { ok: true, ms: performance.now() - empezo, resultado }
+  } catch (error) {
+    return {
+      ok: false,
+      ms: performance.now() - empezo,
+      status: `HTTP ${error.status ?? 0}`,
+      detalle: detalleHttp(error),
+    }
+  }
 }
 
 async function probar(caso) {
   esperandoSeguro.value = { ...esperandoSeguro.value, [caso.id]: true }
   try {
-    const r = await $fetch("/api/secure", {
-      method: "POST",
-      body: {
-        rol: caso.rol === "elegido" ? rolElegido.value : caso.rol,
-        paciente: (caso.roto ? PACIENTES[3] : PACIENTES[0]).datos,
-      },
-    })
-    seguro.value = { ...seguro.value, [caso.id]: r }
+    const emitido = caso.rol ? await emitirToken(caso.rol) : null
+    const paciente = (caso.roto ? INVALIDO : PACIENTES[0]).datos
+    seguro.value = {
+      ...seguro.value,
+      [caso.id]: await predecirSeguro(emitido?.token, paciente),
+    }
   } finally {
     esperandoSeguro.value = { ...esperandoSeguro.value, [caso.id]: false }
   }
+}
+
+async function correrTodos() {
+  for (const caso of CASOS) await probar(caso)
 }
 
 async function golpear() {
   esperandoSeguro.value = { ...esperandoSeguro.value, rafaga: true }
   rafaga.value = null
   try {
+    const emitido = await emitirToken("analista", "rafaga")
+
     const codigos = []
-    for (let i = 0; i < 6; i++) {
-      // Usuario aparte: el limite es por usuario, asi la rafaga no consume el de los otros casos.
-      const r = await $fetch("/api/secure", {
-        method: "POST",
-        body: { rol: rolElegido.value, usuario: "rafaga", paciente: PACIENTES[0].datos },
-      })
-      codigos.push(codigo(r))
+    for (let intento = 0; intento < 6; intento++) {
+      codigos.push(codigo(await predecirSeguro(emitido.token, PACIENTES[0].datos)))
     }
     rafaga.value = codigos
   } finally {
@@ -182,8 +201,21 @@ async function golpear() {
   }
 }
 
-async function verAuditoria() {
-  auditoria.value = await $fetch("/api/auditoria")
+async function verAuditoria(rol) {
+  const emitido = await emitirToken(rol, "auditoria")
+  try {
+    auditoria.value = await $fetch(`${apiPublica}/v1/secure/auditoria`, {
+      headers: { Authorization: `Bearer ${emitido.token}` },
+    })
+    rechazoAuditoria.value = null
+  } catch (error) {
+    auditoria.value = null
+    rechazoAuditoria.value = {
+      rol,
+      status: `HTTP ${error.status ?? 0}`,
+      mensaje: error.data?.detail ?? String(error),
+    }
+  }
 }
 
 watch(elegido, () => { resultados.value = {} })
@@ -191,8 +223,13 @@ watch(elegido, () => { resultados.value = {} })
 onMounted(async () => {
   try {
     modelo.value = await $fetch("/api/health")
-  } catch (e) {
+  } catch {
     modelo.value = null
+  }
+  try {
+    desdeLaMaquina.value = await $fetch("/medicion.json")
+  } catch {
+    desdeLaMaquina.value = null
   }
 })
 </script>
@@ -201,7 +238,6 @@ onMounted(async () => {
   <main>
     <svg class="sprite" aria-hidden="true">
       <symbol id="i-prediccion" viewBox="0 0 20 20"><polygon points="6 4 17 10 6 16" /></symbol>
-      <symbol id="i-metadata" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.2" /><line x1="10" y1="9" x2="10" y2="14" /><line x1="10" y1="6.2" x2="10" y2="6.3" /></symbol>
       <symbol id="i-latencia" viewBox="0 0 20 20"><circle cx="10" cy="10.6" r="6.8" /><polyline points="10 6.8 10 10.6 12.8 12.2" /><line x1="7.6" y1="2.2" x2="12.4" y2="2.2" /></symbol>
       <symbol id="i-lote" viewBox="0 0 20 20"><rect x="2.8" y="3.6" width="14.4" height="12.8" rx="1.8" /><line x1="2.8" y1="8" x2="17.2" y2="8" /><line x1="2.8" y1="12" x2="17.2" y2="12" /></symbol>
       <symbol id="i-seguridad" viewBox="0 0 20 20"><rect x="4.2" y="8.8" width="11.6" height="8.4" rx="1.8" /><path d="M7 8.8V6.6a3 3 0 0 1 6 0v2.2" /></symbol>
@@ -210,7 +246,6 @@ onMounted(async () => {
     <header>
       <div>
         <h1>Predictor de ACV</h1>
-        <p class="sub">Un modelo, cuatro protocolos — cliente de prueba de la plataforma</p>
       </div>
       <div v-if="modelo" class="chapa">
         <span>champion</span>
@@ -228,16 +263,16 @@ onMounted(async () => {
         >☰</button>
         <nav>
           <button
-            v-for="s in SECCIONES"
-            :key="s.id"
-            :class="{ activo: s.id === seccion }"
-            :title="s.nombre"
-            @click="seccion = s.id"
+            v-for="opcion in SECCIONES"
+            :key="opcion.id"
+            :class="{ activo: opcion.id === seccion }"
+            :title="opcion.nombre"
+            @click="seccion = opcion.id"
           >
-            <svg class="icono" aria-hidden="true"><use :href="'#i-' + s.id" /></svg>
+            <svg class="icono" aria-hidden="true"><use :href="'#i-' + opcion.id" /></svg>
             <span class="rotulo">
-              <b>{{ s.nombre }}</b>
-              <span>{{ s.nota }}</span>
+              <b>{{ opcion.nombre }}</b>
+              <span>{{ opcion.nota }}</span>
             </span>
           </button>
         </nav>
@@ -249,18 +284,18 @@ onMounted(async () => {
         <h2>Paciente</h2>
         <div class="tabs">
           <button
-            v-for="(p, i) in PACIENTES"
-            :key="p.nombre"
-            :class="{ activo: i === elegido }"
-            @click="elegido = i"
-          >{{ p.nombre }}</button>
+            v-for="(caso, indice) in PACIENTES"
+            :key="caso.nombre"
+            :class="{ activo: indice === elegido }"
+            @click="elegido = indice"
+          >{{ caso.nombre }}</button>
         </div>
         <p class="detalle">{{ paciente.detalle }}</p>
 
         <dl>
-          <template v-for="(v, k) in paciente.datos" :key="k">
-            <dt>{{ k }}</dt>
-            <dd :class="{ nulo: v === null }">{{ v === null ? "— (se imputa)" : v }}</dd>
+          <template v-for="(valor, campo) in paciente.datos" :key="campo">
+            <dt>{{ campo }}</dt>
+            <dd :class="{ nulo: valor === null }">{{ valor === null ? "— (se imputa)" : valor }}</dd>
           </template>
         </dl>
 
@@ -272,123 +307,92 @@ onMounted(async () => {
       </section>
 
       <div class="protocolos">
-        <section v-for="p in PROTOCOLOS" :key="p.id" class="panel">
+        <section v-for="protocolo in PROTOCOLOS" :key="protocolo.id" class="panel">
           <div class="cabeza">
             <div>
-              <h2>{{ p.nombre }}</h2>
-              <p class="detalle">{{ p.nota }}</p>
+              <h2>{{ protocolo.nombre }}</h2>
+              <p class="detalle">{{ protocolo.nota }}</p>
             </div>
-            <button :disabled="esperando[p.id]" @click="predecir(p.id)">
-              {{ esperando[p.id] ? "…" : "predecir" }}
+            <button :disabled="esperando[protocolo.id]" @click="predecir(protocolo.id)">
+              {{ esperando[protocolo.id] ? "…" : "predecir" }}
             </button>
           </div>
 
-          <template v-if="resultados[p.id]">
-            <div v-if="resultados[p.id].ok" class="salida">
-              <p class="veredicto" :class="{ riesgo: resultados[p.id].resultado.prediccion === 1 }">
-                {{ resultados[p.id].resultado.descripcion }}
+          <template v-if="resultados[protocolo.id]">
+            <div v-if="resultados[protocolo.id].ok" class="salida">
+              <p class="veredicto" :class="{ riesgo: resultados[protocolo.id].resultado.prediccion === 1 }">
+                {{ resultados[protocolo.id].resultado.descripcion }}
               </p>
               <dl>
                 <dt>probabilidad</dt>
-                <dd class="prob">{{ resultados[p.id].resultado.probabilidad }}</dd>
+                <dd class="prob">{{ resultados[protocolo.id].resultado.probabilidad }}</dd>
                 <dt>versión</dt>
-                <dd>v{{ resultados[p.id].resultado.version_modelo }}</dd>
+                <dd>v{{ resultados[protocolo.id].resultado.version_modelo }}</dd>
               </dl>
             </div>
 
             <div v-else class="salida rechazo">
-              <p class="veredicto">rechazado · {{ resultados[p.id].status }}</p>
+              <p class="veredicto">rechazado · {{ resultados[protocolo.id].status }}</p>
               <ul>
-                <li v-for="d in resultados[p.id].detalle" :key="d.campo">
-                  <code>{{ d.campo }}</code> {{ d.mensaje }}
+                <li v-for="problema in resultados[protocolo.id].detalle" :key="problema.campo">
+                  <code>{{ problema.campo }}</code> {{ problema.mensaje }}
                 </li>
               </ul>
-              <p v-for="i in resultados[p.id].imposibles" :key="i" class="nota imposible">{{ i }}</p>
-              <p class="nota">{{ p.rechazo }} · {{ resultados[p.id].ms.toFixed(1) }} ms</p>
+              <p
+                v-for="aviso in resultados[protocolo.id].imposibles"
+                :key="aviso"
+                class="nota imposible"
+              >{{ aviso }}</p>
+              <p class="nota">{{ protocolo.rechazo }}</p>
             </div>
           </template>
         </section>
       </div>
     </div>
 
-    <section v-if="seccion === 'metadata'" class="panel ancha">
-      <h2>Leer la metadata del modelo · REST contra GraphQL</h2>
-      <p class="detalle">
-        La misma lectura por los dos protocolos. Elegí qué campos querés: REST manda todo
-        lo que tiene el endpoint, y suma una llamada si además pedís métricas. Solo están
-        los campos que los dos pueden dar, para que la comparación sea pareja.
-      </p>
-
-      <div class="casillas">
-        <label v-for="c in CAMPOS_META" :key="c">
-          <input v-model="campos" type="checkbox" :value="c"> {{ c }}
-        </label>
-      </div>
-
-      <button :disabled="midiendoMeta || !campos.length" @click="compararMetadata">
-        {{ midiendoMeta ? "midiendo…" : "comparar" }}
-      </button>
-
-      <div v-if="meta" class="duelo">
-        <div v-for="(d, nombre) in meta" :key="nombre" class="tarjeta">
-          <h3>{{ nombre }}</h3>
-          <dl>
-            <dt>llamadas</dt><dd>{{ d.llamadas }}</dd>
-            <dt>bytes</dt><dd>{{ d.bytes }}</dd>
-            <dt>tiempo</dt><dd>{{ d.ms.toFixed(1) }} ms</dd>
-          </dl>
-          <pre v-if="d.query">{{ d.query }}</pre>
-          <pre v-else>{{ d.llamadas > 1 ? "GET /v1/model\nGET /v1/model/metrics" : "GET /v1/model" }}</pre>
-        </div>
-      </div>
-      <p v-if="meta" class="nota">
-        los dos devolvieron exactamente lo mismo:
-        <code>{{ Object.keys(meta.graphql.datos).join(", ") }}</code>
-      </p>
-    </section>
-
     <section v-if="seccion === 'latencia'" class="panel ancha">
-      <h2>Latencia de los tres · la misma predicción, {{ vueltas }} veces cada uno</h2>
+      <h2>Latencia de los tres</h2>
       <p class="detalle">
-        Medido como en el mini-TP 3: las {{ vueltas }} llamadas de un protocolo seguidas, y
-        el promedio por llamada. La primera de cada bloque no se cuenta, porque paga el
-        arranque (GraphQL arma el esquema, gRPC abre el canal). Paciente:
-        <b>{{ paciente.nombre }}</b>.
+        La mide <code>comparar.py</code> desde la máquina, contra <code>localhost</code>:
+        un bloque de llamadas por protocolo y el promedio por llamada, descartando la
+        primera de cada bloque.
       </p>
 
-      <div class="controles">
-        <label>vueltas <input v-model.number="vueltas" type="number" min="5" max="200" step="5"></label>
-        <button :disabled="corriendo" @click="correrCarrera">
-          {{ corriendo ? "corriendo…" : "correr" }}
-        </button>
-      </div>
+      <template v-if="desdeLaMaquina">
+        <table class="barras">
+          <thead>
+            <tr><th>protocolo</th><th>ms por llamada</th><th>contra gRPC</th><th></th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="medicion in desdeLaMaquina.resumen" :key="medicion.id">
+              <td><b>{{ medicion.id }}</b></td>
+              <td>{{ medicion.ms.toFixed(3) }} ms</td>
+              <td>{{ medicion.veces.toFixed(2) }}×</td>
+              <td class="pista">
+                <span class="barra" :style="{ width: (medicion.ms / peorDelScript * 100) + '%' }"></span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="nota">
+          {{ desdeLaMaquina.vueltas }} llamadas por protocolo, el
+          {{ desdeLaMaquina.fecha.slice(8, 10) }}/{{ desdeLaMaquina.fecha.slice(5, 7) }} a las
+          {{ desdeLaMaquina.fecha.slice(11, 16) }}. Los tres devolvieron
+          {{ desdeLaMaquina.coinciden ? "la misma probabilidad" : "probabilidades distintas" }}.
+        </p>
+      </template>
 
-      <table v-if="carrera" class="barras">
-        <thead>
-          <tr><th>protocolo</th><th>ms por llamada</th><th>contra gRPC</th><th></th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="r in carrera.resumen" :key="r.id">
-            <td><b>{{ r.id }}</b></td>
-            <td>{{ r.ms.toFixed(3) }} ms</td>
-            <td>{{ r.veces.toFixed(2) }}×</td>
-            <td class="pista">
-              <span class="barra" :style="{ width: (r.ms / peor * 100) + '%' }"></span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="carrera" class="nota">
-        {{ carrera.vueltas }} vueltas × 3 protocolos en {{ (carrera.total / 1000).toFixed(1) }} s
+      <p v-else class="nota">
+        Todavía no se corrió <code>python comparar.py</code>.
       </p>
     </section>
 
     <section v-if="seccion === 'lote'" class="panel ancha">
-      <h2>Un lote por server-streaming · solo gRPC</h2>
+      <h2>Un lote por server-streaming · gRPC</h2>
       <p class="detalle">
         El <code>.proto</code> tiene un segundo método, <code>PredecirLote</code>, que
         devuelve <code>stream Prediccion</code>: las respuestas salen de a una mientras el
-        servidor las calcula, sin esperar a que termine el lote. Ni REST ni GraphQL hacen esto.
+        servidor las calcula, sin esperar a que termine el lote.
       </p>
 
       <button :disabled="enviandoLote" @click="enviarLote">
@@ -398,19 +402,19 @@ onMounted(async () => {
       <table v-if="lote && lote.llegadas && lote.llegadas.length" class="barras">
         <thead><tr><th>#</th><th>probabilidad</th><th>llegó a los</th><th></th></tr></thead>
         <tbody>
-          <tr v-for="(l, i) in lote.llegadas" :key="i">
-            <td><b>{{ i + 1 }}</b></td>
-            <td class="prob">{{ l.probabilidad }}</td>
-            <td>{{ l.ms.toFixed(1) }} ms</td>
+          <tr v-for="(llegada, indice) in lote.llegadas" :key="indice">
+            <td><b>{{ indice + 1 }}</b></td>
+            <td class="prob">{{ llegada.probabilidad }}</td>
+            <td>{{ llegada.ms.toFixed(1) }} ms</td>
             <td class="pista">
-              <span class="barra" :style="{ width: (l.ms / lote.ms * 100) + '%' }"></span>
+              <span class="barra" :style="{ width: (llegada.ms / lote.ms * 100) + '%' }"></span>
             </td>
           </tr>
         </tbody>
       </table>
     </section>
     <section v-if="seccion === 'seguridad'" class="panel ancha">
-      <h2>Seguridad · la puerta protegida</h2>
+      <h2>Seguridad · el endpoint protegido</h2>
       <p class="detalle">
         <code>POST /v1/secure/predict</code> — el mismo modelo detrás de un token con rol,
         un límite de 5 consultas por minuto y auditoría de cada predicción.
@@ -418,80 +422,81 @@ onMounted(async () => {
       </p>
 
       <div class="controles">
-        <div class="tabs">
-          <button
-            v-for="r in ROLES"
-            :key="r"
-            :class="{ activo: r === rolElegido }"
-            @click="rolElegido = r"
-          >{{ r }}</button>
-        </div>
-        <button @click="pedirToken">pedir token</button>
+        <button @click="correrTodos">correr los cuatro controles</button>
       </div>
-
-      <p v-if="token" class="token">
-        <code>{{ token.token.slice(0, 44) }}…</code>
-        <span>vence en {{ token.expira_en / 60 }} min</span>
-      </p>
 
       <table class="barras">
         <tbody>
-          <tr v-for="c in CASOS" :key="c.id">
+          <tr v-for="caso in CASOS" :key="caso.id">
             <td>
-              <button :disabled="esperandoSeguro[c.id]" @click="probar(c)">probar</button>
+              <button :disabled="esperandoSeguro[caso.id]" @click="probar(caso)">probar</button>
             </td>
-            <td>{{ c.etiqueta }}</td>
-            <td v-if="seguro[c.id]">
-              <span class="codigo" :class="{ mal: codigo(seguro[c.id]) >= 400 }">
-                {{ codigo(seguro[c.id]) }}
+            <td>{{ caso.etiqueta }}</td>
+            <td v-if="seguro[caso.id]">
+              <span class="codigo" :class="{ mal: codigo(seguro[caso.id]) >= 400 }">
+                {{ codigo(seguro[caso.id]) }}
               </span>
             </td>
-            <td v-else class="gris">espera {{ c.espera }}</td>
+            <td v-else class="gris">espera {{ caso.espera }}</td>
             <td>
-              <template v-if="seguro[c.id]">
-                <span v-if="seguro[c.id].ok" class="prob">
-                  {{ seguro[c.id].resultado.probabilidad }}
-                  &nbsp;v{{ seguro[c.id].resultado.version_modelo }}
+              <template v-if="seguro[caso.id]">
+                <span v-if="seguro[caso.id].ok" class="prob">
+                  {{ seguro[caso.id].resultado.probabilidad }}
+                  &nbsp;v{{ seguro[caso.id].resultado.version_modelo }}
                 </span>
                 <span v-else>
-                  {{ seguro[c.id].detalle.map((d) => (d.campo ? d.campo + ": " : "") + d.mensaje).join(" · ") }}
+                  {{ seguro[caso.id].detalle
+                       .map((problema) => (problema.campo ? problema.campo + ": " : "") + problema.mensaje)
+                       .join(" · ") }}
                 </span>
               </template>
             </td>
+            <td class="gris">{{ caso.freno }}</td>
           </tr>
 
           <tr>
             <td>
               <button :disabled="esperandoSeguro.rafaga" @click="golpear">probar</button>
             </td>
-            <td>6 en un minuto</td>
+            <td>analista, 6 en un minuto</td>
             <td v-if="rafaga">
               <span class="codigo mal">429</span>
             </td>
             <td v-else class="gris">espera 429</td>
             <td>
-              <span v-for="(c, i) in rafaga" :key="i" class="codigo" :class="{ mal: c >= 400 }">
-                {{ c }}
-              </span>
+              <span
+                v-for="(codigoHttp, indice) in rafaga"
+                :key="indice"
+                class="codigo"
+                :class="{ mal: codigoHttp >= 400 }"
+              >{{ codigoHttp }}</span>
             </td>
+            <td class="gris">límite de tasa — pasa los tres, pero no tantas veces</td>
           </tr>
         </tbody>
       </table>
 
-      <div class="controles" style="margin-top:1.1rem">
-        <button @click="verAuditoria">ver la auditoría</button>
-        <span class="detalle" style="margin:0">solo el rol <code>admin</code> puede leerla</span>
+      <h3 style="margin:1.8rem 0 .5rem; font-size:1rem">Auditoría</h3>
+      <div class="controles">
+        <button @click="verAuditoria('admin')">leer como admin</button>
+        <button @click="verAuditoria('analista')">leer como analista</button>
       </div>
+
+      <p v-if="rechazoAuditoria" class="nota">
+        rol <code>{{ rechazoAuditoria.rol }}</code> ·
+        <span class="codigo mal">{{ rechazoAuditoria.status }}</span>
+        {{ rechazoAuditoria.mensaje }}
+      </p>
 
       <table v-if="auditoria?.length" class="barras">
         <thead><tr><th>hora</th><th>usuario</th><th>huella de la consulta</th><th>pred</th><th>modelo</th></tr></thead>
         <tbody>
-          <tr v-for="(a, i) in auditoria" :key="i">
-            <td>{{ a.ts.slice(11, 19) }}</td>
-            <td>{{ a.usuario }}</td>
-            <td><code>{{ a.hash_entrada.slice(0, 16) }}…</code></td>
-            <td>{{ a.prediccion }}</td>
-            <td>v{{ a.version_modelo }}</td>
+          <tr v-for="(registro, indice) in auditoria" :key="indice">
+            <td>{{ registro.ts.slice(11, 19) }}</td>
+            <td>{{ registro.usuario }}</td>
+            <td><code>{{ registro.hash_entrada.slice(0, 16) }}…</code></td>
+            <td>{{ registro.prediccion }}</td>
+            <td>v{{ registro.version_modelo }}</td>
           </tr>
         </tbody>
       </table>
@@ -528,18 +533,15 @@ body {
   font: 16px/1.5 system-ui, sans-serif;
 }
 
-/* El encabezado y la lateral quedan fijos; el scroll vive adentro del contenido. */
 main { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
 
 .cuerpo {
   display: grid; grid-template-columns: 230px 1fr; min-height: 0;
-  /* El navegador interpola grid-template-columns, asi que el plegado no salta. */
   transition: grid-template-columns .22s ease;
 }
 .cuerpo.plegada { grid-template-columns: 3.9rem 1fr; }
 
 .contenido { overflow-y: auto; min-height: 0; padding: 1.3rem 1.5rem 4rem; }
-/* Para que en una pantalla muy ancha el contenido no se estire de punta a punta. */
 .contenido > * { max-width: 1240px; }
 
 .lateral {
@@ -551,7 +553,6 @@ main { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
 }
 .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .lateral nav { display: grid; gap: .4rem; }
-/* Mismo boton y mismo lugar este abierta o plegada: solo cambia lo que abre. */
 .tirador {
   justify-self: start; width: 2.4rem; padding: .4rem 0;
   background: transparent; border: 1px solid var(--borde);
@@ -559,8 +560,6 @@ main { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
 }
 .tirador:hover { color: var(--texto); border-color: var(--acento); }
 
-/* Plegada quedan solo los iconos: el rotulo se desvanece pero sigue en el DOM,
-   asi se puede animar y el lector de pantalla lo sigue leyendo. */
 .cuerpo.plegada .lateral { padding: 1.3rem .7rem; }
 .cuerpo.plegada .lateral nav button { padding: .6rem; }
 .cuerpo.plegada .rotulo { opacity: 0; }
@@ -634,17 +633,6 @@ dd.nulo { color: var(--gris); font-style: italic; }
 }
 .coinciden b { display: inline-block; margin-top: .3rem; font-size: 1.05rem; }
 
-.casillas { display: flex; gap: .4rem 1.1rem; flex-wrap: wrap; margin-bottom: 1rem; color: var(--gris); }
-.casillas label { cursor: pointer; }
-
-.duelo { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1.1rem; }
-.tarjeta { background: #141a23; border: 1px solid var(--borde); border-radius: 8px; padding: .9rem 1rem; }
-.tarjeta pre {
-  margin: .8rem 0 0; padding: .6rem .7rem; overflow-x: auto;
-  background: #0d1218; border-radius: 6px; color: var(--gris);
-  font-size: .82rem; line-height: 1.4;
-}
-
 .controles { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
 .controles input {
   width: 5rem; background: #0d1218; border: 1px solid var(--borde); color: var(--texto);
@@ -664,10 +652,6 @@ button {
 button:disabled { opacity: .5; cursor: default; }
 button.ancho { width: 100%; margin-top: 1.1rem; }
 
-.token { margin: 0 0 1rem; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
-.token code { background: #0d1218; padding: .35rem .6rem; border-radius: 6px; font-size: .82rem; }
-.token span { color: var(--gris); font-size: .86rem; }
-
 .codigo {
   display: inline-block; min-width: 2.6rem; margin-right: .3rem; padding: .1rem .45rem;
   border-radius: 5px; background: #14301f; color: var(--bien);
@@ -682,7 +666,7 @@ button.ancho { width: 100%; margin-top: 1.1rem; }
 
 @media (max-width: 1100px) {
   body, main { height: auto; overflow: visible; }
-  .cuerpo, .cuerpo.plegada, .columnas, .duelo { grid-template-columns: 1fr; }
+  .cuerpo, .cuerpo.plegada, .columnas { grid-template-columns: 1fr; }
   .lateral, .cuerpo.plegada .lateral { border-right: 0; border-bottom: 1px solid var(--borde); overflow: visible; padding: 1.3rem .9rem; }
   .cuerpo.plegada .rotulo { opacity: 1; }
   .cuerpo.plegada .lateral nav button { padding: .6rem .8rem; }

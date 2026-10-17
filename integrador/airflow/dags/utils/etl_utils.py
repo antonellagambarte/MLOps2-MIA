@@ -1,9 +1,8 @@
 """Lectura y escritura de la metadata del dataset en S3.
 
-Ese archivo (`data_info/data.json`) es el contrato entre el ETL y la API: guarda
-las columnas despues del one-hot, las medianas usadas para imputar y la media y
-el desvio del escalado, para que la API pueda aplicar las mismas transformaciones
-a cada paciente que llega.
+El archivo `data_info/data.json` guarda las columnas despues del one-hot, las medianas usadas 
+para imputar y la media y el desvio del escalado, para que la API pueda aplicar las mismas 
+transformaciones a cada paciente que llega.
 """
 import json
 

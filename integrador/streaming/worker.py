@@ -31,8 +31,7 @@ MEDIA_GLUCOSA_ENTRENAMIENTO = float(os.getenv("MEDIA_GLUCOSA_ENTRENAMIENTO", "10
 UMBRAL_DRIFT = float(os.getenv("UMBRAL_DRIFT", "130"))
 INTERVALO_RECARGA = float(os.getenv("INTERVALO_RECARGA_SEG", "30"))
 
-# (modelo, version, umbral, datos). Se reemplaza entero, no campo por campo, para que
-# el bucle de eventos nunca lea el modelo nuevo con la metadata vieja.
+# (modelo, version, umbral, datos)
 estado = None
 
 
@@ -100,7 +99,12 @@ def metricas(ventana):
 def main():
     global estado
     mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"))
-    estado = cargar_modelo()
+    while estado is None:
+        try:
+            estado = cargar_modelo()
+        except Exception as error:
+            print(f"No se pudo cargar el modelo: {error}")
+            time.sleep(INTERVALO_RECARGA)
     threading.Thread(target=vigilar_champion, daemon=True).start()
     s3 = boto3.client("s3")
 
@@ -122,7 +126,6 @@ def main():
     procesados = 0
 
     for mensaje in consumidor:
-        # Una sola lectura por evento: el vigilante pudo haberlo cambiado.
         modelo, version, umbral, datos = estado
         paciente = mensaje.value["paciente"]
         t_evento = mensaje.value["t"]

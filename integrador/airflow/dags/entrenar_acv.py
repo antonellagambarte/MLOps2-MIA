@@ -8,10 +8,6 @@ sys.path.append("/opt/airflow/dags")
 
 texto_markdown = """
 ### Entrenamiento del modelo de ACV
-
-Lee los datos que dejó `etl_acv` en `s3://data/curated/acv/`, entrena un XGBoost
-con los hiperparámetros encontrados con Optuna, evalúa sobre test y registra el
-modelo en MLflow como `predictor_acv`.
 """
 
 # Encontrados con Optuna en Aprendizaje de Máquina I
@@ -156,7 +152,6 @@ def entrenar_acv():
             return challenger
 
         def _publicar_en_el_lake(modelo, version):
-            """Sube el modelo a la zona models/ del lake, versionado (clase 6)."""
             buffer = io.BytesIO()
             joblib.dump(modelo, buffer)
             key = f"{consts.ZONA_MODELS.split('/', 1)[1]}v{version}/{consts.MODEL_FILE}"

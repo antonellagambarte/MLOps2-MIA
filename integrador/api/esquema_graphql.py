@@ -1,5 +1,5 @@
 """
-Esquema GraphQL sobre el mismo modelo que sirve REST.
+Esquema GraphQL.
 """
 from typing import Optional
 
@@ -78,8 +78,6 @@ class Prediccion:
 class Mutation:
     @strawberry.mutation
     def predecir(self, paciente: PacienteInput) -> Prediccion:
-        # El .proto de gRPC tipa las categoricas con enum; GraphQL las recibe como
-        # texto, asi que la validacion la hace el mismo Pydantic que usa REST.
         try:
             validado = Caracteristicas(
                 gender=paciente.gender,

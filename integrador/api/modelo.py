@@ -17,16 +17,14 @@ ALIAS_MODELO = os.getenv("ALIAS_MODELO", "champion")
 URI_MODELO = f"models:/{NOMBRE_MODELO}@{ALIAS_MODELO}"
 INTERVALO_RECARGA = float(os.getenv("INTERVALO_RECARGA_SEG", "30"))
 
-# Se carga al arrancar. Si falla, la API igual levanta y /health lo reporta.
-estado = None   # (model, version, run_id, umbral, data_dict)
+estado = None
 error_carga = None
 
 
 def load_model(model_name: str, alias: str):
-    """Trae el modelo desde MLflow y la metadata del ETL (data.json) desde S3.
-
-    Devuelve (modelo, versión, run_id, umbral, data_dict). MLflow entrega la
-    dirección del artefacto. El archivo se baja de MinIO.
+    """"Trae el modelo de MLflow y la metadata del ETL (data.json) de MinIO.
+    Devuelve (modelo, versión, run_id, umbral, data_dict). MLflow solo da la
+    ruta del modelo. El archivo del modelo se baja de MinIO.
     """
     client_mlflow = MlflowClient()
     model_data_mlflow = client_mlflow.get_model_version_by_alias(model_name, alias)
@@ -34,7 +32,6 @@ def load_model(model_name: str, alias: str):
     version_model_ml = model_data_mlflow.version
     umbral_ml = float(model_data_mlflow.tags.get("umbral", 0.5))
 
-    # Metadata del ETL: categorías, columnas, medianas y escalado
     s3 = boto3.client("s3")
     result_s3 = s3.get_object(Bucket="data", Key="data_info/data.json")
     data_dictionary = json.loads(result_s3["Body"].read().decode())
@@ -56,9 +53,8 @@ def cargar():
 
 
 def check_model():
-    """Corre en segundo plano después de cada predicción: si el champion cambió
-    de versión (porque el DAG de entrenamiento promovió uno nuevo), lo recarga
-    sin reiniciar la API."""
+    """Si el champion cambió de versión (el DAG de entrenamiento promovió uno
+    nuevo), lo recarga sin reiniciar la API."""
     try:
         nueva_version = MlflowClient().get_model_version_by_alias(NOMBRE_MODELO, ALIAS_MODELO).version
         if estado is None or nueva_version != estado[1]:
@@ -68,7 +64,7 @@ def check_model():
 
 
 def vigilar_champion():
-    """Dispara check_model() cada tanto, igual que el servidor gRPC y el worker.
+    """Dispara check_model() cada tanto.
     """
     while True:
         time.sleep(INTERVALO_RECARGA)
@@ -76,7 +72,6 @@ def vigilar_champion():
 
 
 def predecir(paciente: dict):
-    """Puntúa un paciente ya validado. Devuelve (clase, probabilidad, versión, descripción)."""
     actual = estado
     if actual is None:
         raise RuntimeError(f"No se pudo cargar {URI_MODELO}. {error_carga}")

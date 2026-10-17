@@ -1,5 +1,3 @@
-# Configuración común a los cuatro contenedores de Airflow. Se define una vez acá
-# (&airflow-common) y cada servicio la reusa con "<<: *airflow-common".
 x-airflow-common: &airflow-common
   build: ./dockerfiles/airflow
   image: integrador/airflow:local
@@ -308,24 +306,21 @@ services:
     image: integrador/frontend:local
     container_name: integrador_frontend
     restart: unless-stopped
-    # Lo unico que recibe es la clave para pedir un token: ni MinIO ni la base.
     environment:
       NUXT_API_BASE: http://fastapi:8800
       NUXT_GRPC_TARGET: grpc:50051
+      NUXT_PUBLIC_API_PUBLICA: http://localhost:${API_HOST_PORT}
       NUXT_API_KEY_TOKENS: ${API_KEY_TOKENS}
-      # Sin esto, en Windows el watcher no ve los archivos nuevos del servidor.
       CHOKIDAR_USEPOLLING: "true"
     ports:
       - "${FRONTEND_HOST_PORT}:3000"
     volumes:
       - ./frontend:/app
-      # Las dependencias quedan en la imagen: el montaje de arriba no las tapa.
       - /app/node_modules
-      # Afuera de /app: ahi Docker crearia el punto de montaje en el repo.
       - ./grpc_service/scoring.proto:/proto/scoring.proto:ro
     depends_on:
       fastapi:
-        condition: service_healthy
+        condition: service_started
 
 volumes:
   postgres_data:
