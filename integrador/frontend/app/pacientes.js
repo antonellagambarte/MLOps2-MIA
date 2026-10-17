@@ -1,3 +1,5 @@
+/* Pacientes de prueba para la aplicación */
+
 export const PACIENTES = [
   {
     nombre: "Riesgo alto",

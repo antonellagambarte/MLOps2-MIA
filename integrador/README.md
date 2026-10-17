@@ -2,13 +2,14 @@
 
 Plataforma de predicción en tiempo real sobre el modelo de **accidente cerebrovascular**
 desarrollado en Aprendizaje de Máquina I. El modelo se entrena y se versiona dentro de la
-plataforma, y se sirve por **cuatro protocolos** —REST, GraphQL, gRPC y streaming— más una
-**puerta protegida** con autenticación, límite de consultas y auditoría.
+plataforma, y se sirve por **cuatro protocolos** —REST, GraphQL, gRPC y streaming— más un
+**endpoint protegido** con autenticación, límite de consultas y auditoría.
 
-Nivel de la entrega: **contenedores**. Todo corre sobre Docker, levanta con un solo comando y
-no necesita nada instalado en la máquina más que Docker.
+Nivel de la entrega: **contenedores**. La plataforma corre entera sobre Docker, levanta con un
+solo comando y no necesita nada instalado en la máquina más que Docker. Lo único que corre
+afuera es la medición de latencia (`comparar.py`), que necesita Python.
 
-## Autor
+## Autora
 
 Antonella Gambarte
 
@@ -25,7 +26,7 @@ ahí y la plataforma respeta:
 - El **umbral de decisión es 0.4**, no 0.5: el dataset está muy desbalanceado y mover el umbral
   mejora el recall, que es lo que importa en un tamizaje clínico.
 - El **BMI faltante se imputa por grupo etario** (0-25, 25-40, 40-60, 60+), con las medianas
-  calculadas en el entrenamiento. Si una petición no manda `bmi`, la plataforma lo imputa igual.
+  calculadas en el entrenamiento.
 
 La métrica con la que se decide si un modelo nuevo reemplaza al que está en producción es el
 **F1**.
@@ -41,12 +42,12 @@ sin pasos previos.
 | Servicio | Para qué | Dónde | Usuario |
 | --- | --- | --- | --- |
 | **frontend** | cliente de prueba de los protocolos | http://localhost:3000 | — |
-| **fastapi** | REST, GraphQL y la puerta protegida | http://localhost:8800 · [/docs](http://localhost:8800/docs) | — |
+| **fastapi** | REST, GraphQL y el endpoint protegido | http://localhost:8800 · [/docs](http://localhost:8800/docs) | — |
 | **grpc** | servidor de inferencia gRPC | `localhost:50051` | — |
 | **airflow** | orquestación: ETL y entrenamiento | http://localhost:8080 | `airflow` / `airflow` |
 | **mlflow** | tracking y registro de modelos | http://localhost:5000 | — |
 | **minio** | Data Lake S3 | http://localhost:9001 | `mlops` / `mlops12345` |
-| **redpanda** | broker de streaming (API de Kafka) | `localhost:9092` | — |
+| **redpanda** | broker de streaming | `localhost:9092` | — |
 | **postgres** | metadata de Airflow y de MLflow | `localhost:5433` | `mlops` / `mlops` |
 | **streaming-worker** | puntúa los eventos y vigila el drift | sin puerto | — |
 | `minio-init`, `airflow-init` | crean buckets y migran la base, y se apagan | — | — |
@@ -59,10 +60,10 @@ Entre contenedores los servicios se encuentran por nombre: `postgres:5432`, `min
 
 ```mermaid
 flowchart TB
-    cliente(["Cliente: frontend, curl o notebook"])
+    cliente(["Cliente: frontend o curl"])
 
     subgraph serving["Serving"]
-        fastapi["<b>FastAPI</b> :8800<br/>REST · GraphQL · puerta protegida"]
+        fastapi["<b>FastAPI</b> :8800<br/>REST · GraphQL · endpoint protegido"]
         grpc["<b>gRPC</b> :50051<br/>unary · server-streaming"]
         worker["<b>worker</b><br/>puntúa cada evento"]
     end
@@ -98,32 +99,31 @@ flowchart TB
 3. Los **tres procesos de serving** le preguntan a MLflow qué versión tiene el alias `champion`.
    Si cambió, se recargan solos en menos de 30 segundos, **sin reiniciar nada y sin esperar una
    petición**.
-4. Un cliente pide una predicción por **REST**, **GraphQL** o **gRPC**: los tres devuelven el
-   mismo número.
+4. Un cliente pide una predicción por **REST**, **GraphQL** o **gRPC**.
 5. El **productor** publica pacientes al topic `pacientes` y el **worker** los puntúa de a uno,
    calcula métricas por ventana de un segundo, detecta *drift* y avisa por el topic `alertas`.
-6. La **puerta protegida** (`/v1/secure/predict`) sirve el mismo modelo pero exige un token con
+6. El **endpoint protegido** (`/v1/secure/predict`) sirve el mismo modelo pero exige un token con
    rol, limita las consultas por minuto y deja registro de cada predicción.
 
 ## Ejecución con Docker Compose
 
-Hace falta **Docker Desktop** y nada más. Parado en `integrador/`:
+Hace falta **Docker con Compose v2** (el comando `docker compose`) y nada más. Parado en
+`integrador/`:
 
 ```bash
 docker compose up -d --build
 docker compose ps
 ```
 
-La primera vez tarda unos minutos porque construye cinco imágenes. Cuando todos los servicios
-estén `healthy`, **la primera vez hay que generar el modelo**:
+**La primera vez hay que generar el modelo:**
 
 1. Entrar a Airflow en http://localhost:8080 con `airflow` / `airflow`.
 2. Ejecutar el DAG **`etl_acv`** y esperar que termine.
 3. Ejecutar el DAG **`entrenar_acv`**.
 
 Eso deja una versión registrada en MLflow con el alias `champion`, y los tres servicios de
-serving la toman solos. Desde ese momento `http://localhost:3000` y
-`http://localhost:8800/docs` quedan operativos.
+serving la toman solos. Desde ese momento `http://localhost:3000` y `http://localhost:8800/docs`
+quedan operativos.
 
 Para la demo de streaming, el productor va en un perfil aparte para que no dispare eventos en
 cada arranque:
@@ -136,7 +136,7 @@ Para apagar todo:
 
 ```bash
 docker compose down        # conserva las bases y los buckets
-docker compose down -v     # borra los volúmenes: hay que volver a correr los dos DAGs
+docker compose down -v     # borra los volúmenes: hay que repetir los pasos de la primera vez
 ```
 
 ## Verificación
@@ -154,37 +154,13 @@ curl -s localhost:8800/health
 # {"status":"healthy","modelo_cargado":true,"version_modelo":"10","umbral":0.4}
 ```
 
-Que PostgreSQL tenga **las dos bases separadas**, `airflow` y `mlflow`:
-
-```bash
-docker compose exec postgres psql -U mlops -d airflow -c "\l"
-```
-
-Que el Data Lake tenga las **cuatro zonas** y el modelo versionado:
-
-```bash
-docker compose exec fastapi python -c "
-import boto3, collections
-s3 = boto3.client('s3')
-zonas = collections.Counter()
-for o in s3.list_objects_v2(Bucket='data').get('Contents', []):
-    zonas['/'.join(o['Key'].split('/')[:2])] += 1
-for z, n in sorted(zonas.items()): print(f'{z:30} {n}')
-"
-# curated/acv          4
-# data_info/data.json  1
-# models/v10           1
-# raw/acv              1
-# raw/eventos          8
-# staged/acv           1
-```
-
-Los mismos buckets se pueden mirar en la consola de MinIO: http://localhost:9001
+Los buckets y las zonas del Data Lake se ven en la consola de MinIO: http://localhost:9001
 
 ## Probar los cuatro protocolos
 
-La forma más cómoda es **http://localhost:3000**, que tiene una sección por protocolo. Para
-hacerlo a mano, el mismo paciente por todas las puertas:
+La forma más cómoda es **http://localhost:3000**, que tiene secciones para REST, GraphQL y
+gRPC, la latencia y el endpoint protegido. Streaming no tiene sección: se ve por los logs del
+worker. Para hacerlo a mano, el mismo paciente por todos los protocolos:
 
 ```bash
 PACIENTE='{"gender":"Female","age":67,"hypertension":0,"heart_disease":1,
@@ -242,14 +218,11 @@ de prueba ejercita los dos y mide latencia contra REST:
 
 ```bash
 docker compose exec grpc python cliente.py
-# --- unary: Predecir (grpc:50051) ---
-#   prediccion 1 | probabilidad 0.5005481839179993 | modelo v10 | Tiene riesgo de ACV
-# --- server-streaming: PredecirLote (3 casos) ---
-# --- latencia, n=100 ---
-#   gRPC   media  18.72 ms | p50  18.23 | p95  22.25
-#   REST   media  23.86 ms | p50  23.68 | p95  28.75
-#   REST/gRPC: 1.27x
 ```
+
+La medición de latencia corre en el mismo contenedor que el servidor gRPC, así que gRPC no cruza la red
+y REST sí: sirve para ver los dos métodos andando, no para comparar. La comparación es la de
+[Comparar la latencia](#comparar-la-latencia).
 
 Las categóricas están **tipadas con `enum`** en el `.proto`, así que un valor inventado no se
 puede ni enviar: el contrato lo impide en el cliente.
@@ -266,7 +239,7 @@ camino**. En los logs del worker se ve la media de la ventana saltar de ~107 a ~
 alerta por el topic `alertas`. Los eventos aterrizan en el lake particionados por fecha, en
 `raw/eventos/fecha=<hoy>/`.
 
-### La puerta protegida
+### El endpoint protegido
 
 ```bash
 TOKEN=$(curl -s -X POST localhost:8800/v1/secure/token \
@@ -283,10 +256,29 @@ por minuto, **429**. Cada predicción que pasa queda registrada, y la auditoría
 rol `admin`:
 
 ```bash
+TOKEN_ADMIN=$(curl -s -X POST localhost:8800/v1/secure/token \
+  -H "X-API-Key: clave-de-servicio-local" -H "Content-Type: application/json" \
+  -d '{"usuario":"antonella","rol":"admin"}' | grep -o '"token":"[^"]*' | cut -d'"' -f4)
+
 curl -s localhost:8800/v1/secure/auditoria -H "Authorization: Bearer $TOKEN_ADMIN"
 # [{"ts":"2026-10-15T18:42:07+00:00","usuario":"antonella",
 #   "hash_entrada":"c96a59f2814f…","prediccion":1,"version_modelo":"10"}]
 ```
+
+## Comparar la latencia
+
+`comparar.py` manda el mismo paciente por REST, GraphQL y gRPC, 1000 veces por protocolo, y
+saca el promedio por llamada. Deja el resultado en `frontend/public/medicion.json`, que es lo
+que muestra la sección Latencia del frontend. Corre **desde la máquina, no desde un contenedor**, así cada protocolo
+da un solo salto de red. Es lo único que corre fuera de Docker:
+
+```bash
+pip install requests grpcio grpcio-tools
+python comparar.py           # o python comparar.py 200, para otra cantidad de llamadas
+```
+
+Imprime el promedio por llamada de cada protocolo y confirma que los tres devolvieron la misma
+probabilidad.
 
 ## Estructura del repositorio
 
@@ -294,6 +286,7 @@ curl -s localhost:8800/v1/secure/auditoria -H "Authorization: Bearer $TOKEN_ADMI
 integrador/
 ├── docker-compose.yaml        los servicios, la red y los volúmenes
 ├── .env                       credenciales y puertos de desarrollo
+├── comparar.py                latencia de REST, GraphQL y gRPC desde la máquina
 ├── dataset/                   el CSV crudo, versionado
 ├── airflow/dags/
 │   ├── etl_acv.py             6 tareas: del CSV crudo a curated/
@@ -303,7 +296,7 @@ integrador/
 │   ├── main.py                REST y el montaje de GraphQL
 │   ├── modelo.py              carga del champion y recarga en caliente
 │   ├── esquema_graphql.py     Query de metadata y mutation predecir
-│   ├── seguridad.py           la puerta protegida
+│   ├── seguridad.py           el endpoint protegido
 │   ├── contrato.py            el Pydantic que comparten REST y GraphQL
 │   └── src/predict.py         preprocesa con data.json y puntúa
 ├── grpc_service/
@@ -315,11 +308,7 @@ integrador/
 │   ├── productor.py           publica pacientes e inyecta drift
 │   └── worker.py              puntúa, mide por ventana y alerta
 ├── frontend/                  cliente de prueba (Nuxt)
-├── dockerfiles/               una imagen por servicio
-├── notebooks/
-│   └── comparaciones.ipynb    las mediciones entre protocolos
-└── docs/
-    └── arquitectura.html      documentación detallada de cada decisión
+└── dockerfiles/               una imagen por servicio
 ```
 
 ## Carpetas y archivos clave
@@ -330,12 +319,12 @@ integrador/
 | `airflow/dags/etl_acv.py` | las 6 tareas del ETL. Escribe `data_info/data.json`, que es lo que permite que la inferencia preprocese **exactamente** igual que el entrenamiento |
 | `airflow/dags/entrenar_acv.py` | entrena, registra y decide la promoción con `f1_challenger > f1_champion` |
 | `api/modelo.py` | el estado del modelo en una tupla, y el hilo que cada 30 s pregunta si hay un champion nuevo |
-| `api/contrato.py` | un solo contrato de entrada para REST, GraphQL y la puerta protegida: los tres rechazan exactamente la misma entrada |
+| `api/contrato.py` | un solo contrato de entrada para REST, GraphQL y el endpoint protegido: los tres rechazan exactamente la misma entrada |
 | `api/src/predict.py` | aplica `data.json` —one-hot, imputación por grupo etario y escalado— y puntúa con el umbral 0.4 |
 | `grpc_service/scoring.proto` | el contrato tipado. Las categóricas son `enum`, el `bmi` es `optional` para distinguir "no vino" de "vino en cero" |
 | `streaming/worker.py` | ventana deslizante de un segundo, throughput y p95, detección de drift y aterrizaje en el lake |
 | `dockerfiles/postgres/init.sql` | crea la base `mlflow`; la base `airflow` la crea la imagen |
-| `docs/arquitectura.html` | el detalle de cada decisión, con el paso a paso y las alternativas descartadas |
+| `comparar.py` | mide la latencia de los tres protocolos desde la máquina y escribe `frontend/public/medicion.json`, que muestra el frontend |
 
 ## Conceptos generales importantes
 
@@ -347,8 +336,8 @@ por eso necesita credenciales de los dos.
 `challenger`. La promoción a `champion` es automática y por F1, con comparación estricta: si
 empata, no promueve.
 
-**Las cuatro zonas del Data Lake.** El bucket `data` está organizado como se enseña en la
-materia: `raw/` el dato crudo e inmutable en CSV, `staged/` limpio y en Parquet, `curated/` las
+**Las cuatro zonas del Data Lake.** El bucket `data` está organizado en cuatro zonas:
+`raw/` el dato crudo e inmutable en CSV, `staged/` limpio y en Parquet, `curated/` las
 features listas para entrenar, y `models/v<N>/` el artefacto publicado y versionado. El número
 de carpeta es la versión de MLflow, así los dos quedan atados.
 
@@ -356,24 +345,62 @@ de carpeta es la versión de MLflow, así los dos quedan atados.
 pregunta a MLflow qué versión es la champion. Si cambió, la bajan y la reemplazan de una sola
 asignación. El modelo se actualiza **sin reiniciar el contenedor y sin que llegue tráfico**.
 
-**El modelo vive en dos lugares, a propósito.** FastAPI lo carga con el cargador de MLflow
-(`mlflow.sklearn.load_model`); el servidor gRPC y el worker bajan el `.pkl` versionado del lake
-con `boto3` y `joblib`. Los tres le preguntan a MLflow qué versión corresponde, y los tres
-devuelven el mismo número — está verificado. Son las dos formas que enseña la materia y
-conviven sin conflicto.
+**El modelo vive en dos lugares, a propósito.** FastAPI lo carga desde MLflow
+(`mlflow.sklearn.load_model`), como en MLOps I; el servidor gRPC y el worker bajan el `.pkl`
+versionado de la zona `models/` del lake con `boto3` y `joblib`, como en MLOps II. Los tres le
+preguntan a MLflow qué versión corresponde y devuelven el mismo número: `comparar.py` lo
+comprueba entre FastAPI y gRPC cada vez que se corre.
 
-**El preprocesamiento está escrito una vez y se aplica dos veces.** El ETL calcula las medianas
-y los parámetros de escalado y los deja en `data_info/data.json`; la inferencia los lee de ahí.
-Si se recalcularan en la inferencia, el modelo recibiría datos escalados de otra forma que en el
-entrenamiento, y las predicciones serían silenciosamente incorrectas.
+## Decisiones y alcance
 
-**Seguridad.** La puerta protegida no reemplaza a `/v1/predict`: es un endpoint aparte. Dos
-límites conocidos de la implementación, que son los del material de la materia: el contador del
-límite por minuto vive **en memoria** —alcanza porque uvicorn corre con un solo worker, en
-producción iría en Redis o en el gateway— y la auditoría también, así que se pierde al reiniciar
-el contenedor.
+Lo que se decidió y por qué, y lo que quedó simplificado a propósito.
 
----
+### Endpoint protegido
 
-Para el detalle de cada decisión, las alternativas que se descartaron y las mediciones completas:
-**[`docs/arquitectura.html`](docs/arquitectura.html)**.
+No reemplaza a `/v1/predict`: es un endpoint aparte, sobre el mismo modelo.
+
+- **No hay usuarios ni login.** Con la clave de servicio (`X-API-Key`) cualquiera pide un token
+  con el usuario y el rol que quiera. Es una simplificación para la demo.
+- **El emisor firma cualquier rol, incluso uno sin permiso.** Quién puede predecir lo decide el
+  endpoint, no el emisor; así se puede probar el 403.
+- El token vence a los **15 minutos** y se firma con `JWT_SECRET`, del `.env`.
+- **Los controles se aplican en orden**: token, rol, límite por minuto y contrato. El primero
+  que falla define la respuesta: un rol sin permiso con `age` 150 recibe 403, no 422.
+- **La auditoría guarda el hash de la entrada, no los datos del paciente.** Alcanza para
+  reconocer dos consultas iguales sin almacenar información clínica.
+- **El límite y la auditoría se guardan en la memoria de la API.** Si se reinicia el
+  contenedor, el contador de consultas vuelve a cero y la auditoría se pierde. En producción
+  irían en un almacenamiento aparte, como Redis o una base de datos.
+- **La clave de servicio nunca llega al navegador.** Para pedir un token hace falta esa clave, y
+  todo lo que está en una página web lo puede ver quien la abre. Por eso el frontend pide el
+  token desde su servidor, y al navegador solo le llega el token.
+- **CORS habilita solo el origen del frontend** (`ORIGENES_PERMITIDOS` en el `.env`). Con `*`,
+  cualquier sitio podría consultar el modelo desde el navegador de quien lo visite.
+
+### Streaming: una simulación
+
+- **No hay una fuente real de eventos.** El productor toma pacientes al azar del CSV crudo del
+  lake (`raw/acv/`) y los publica en el topic `pacientes`.
+- **El drift está forzado.** Desde la mitad de la corrida (el evento 400 de 800), el productor
+  le suma 50 a la glucosa para que la alerta salga en la demo.
+- **La referencia del drift está fija**: media de glucosa 106 y umbral 130, como variables de
+  entorno del worker (`MEDIA_GLUCOSA_ENTRENAMIENTO`, `UMBRAL_DRIFT`). No se calculan a partir del
+  entrenamiento.
+- **Se vigila una sola variable**, la glucosa, y la alerta se evalúa cada 200 eventos sobre la
+  ventana del último segundo.
+- **El tiempo que muestra el worker en sus logs es solo lo que tarda el modelo en puntuar cada
+  evento.**
+
+### Entrenamiento y promoción
+
+- **Los hiperparámetros son fijos**: los que encontró Optuna en Aprendizaje de Máquina I. El DAG
+  no vuelve a optimizar.
+- **Reentrenar con los mismos datos no promueve.** El split y el XGBoost tienen semilla fija, así
+  que el F1 sale idéntico, y la comparación es estricta. Las versiones 11 y 12 dieron el mismo F1
+  que la 10 (0.2806) y quedaron como `challenger`. La promoción se ve en el primer entrenamiento
+  o cuando cambian los datos.
+
+### Otras
+
+- **El navegador llama directo a REST y GraphQL; gRPC pasa por el servidor de Nuxt**, porque el
+  navegador no habla gRPC.

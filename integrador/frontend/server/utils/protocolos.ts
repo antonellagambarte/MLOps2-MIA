@@ -1,9 +1,6 @@
 import { partir } from "#shared/protocolos"
 import { aCaso, CODIGOS_GRPC, predecirUnary } from "./grpc"
 
-// Los clientes de REST y GraphQL estan en shared/protocolos.ts porque el navegador
-// tambien los usa. Aca queda el de gRPC, que solo puede correr del lado del servidor.
-
 export { detalleHttp } from "#shared/protocolos"
 
 export async function porGrpc(paciente: Record<string, any>) {

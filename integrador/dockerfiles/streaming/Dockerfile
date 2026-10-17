@@ -6,7 +6,6 @@ RUN apt-get update \
 
 COPY dockerfiles/streaming/requirements.txt /requirements.txt
 
-# Los --trusted-host son por el antivirus
 RUN pip install --no-cache-dir \
     --trusted-host pypi.org \
     --trusted-host files.pythonhosted.org \

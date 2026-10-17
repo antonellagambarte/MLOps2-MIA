@@ -1,8 +1,5 @@
 """
 Transforma un paciente crudo en la fila que espera el modelo, y predice.
-
-Reproduce, paso a paso, lo que el DAG etl_acv hizo sobre el dataset completo,
-usando los valores que ese DAG dejó en data.json
 """
 import pandas as pd
 
@@ -30,7 +27,7 @@ def run(features_dict, data_dict, model, umbral, debug=False):
         )
 
     if debug:
-        print("\n--- 1. Después de forzar tipos categóricos ---")
+        print("\n--- Después de forzar tipos categóricos ---")
         features_df.info()
 
     features_df = pd.get_dummies(
@@ -42,13 +39,13 @@ def run(features_dict, data_dict, model, umbral, debug=False):
     features_df.columns = features_df.columns.str.replace(" ", "_", regex=False)
 
     if debug:
-        print("\n--- 2. Después de get_dummies ---")
+        print("\n--- Después de get_dummies ---")
         features_df.info()
 
     features_df = features_df.reindex(columns=data_dict["columns_after_dummy"], fill_value=0)
 
     if debug:
-        print("\n--- 3. Después de reindexar ---")
+        print("\n--- Después de reindexar ---")
         print(features_df.head(1))
 
     features_df = (features_df - data_dict["standard_scaler_mean"]) / data_dict["standard_scaler_std"]

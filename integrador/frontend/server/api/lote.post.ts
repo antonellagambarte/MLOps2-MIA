@@ -4,7 +4,6 @@ export default defineEventHandler(async (event) => {
   const { pacientes } = await readBody(event)
   const casos = pacientes.map((paciente: any) => aCaso(paciente).caso)
 
-  // Lo que interesa es cuando llego cada prediccion, no el total del lote.
   const empezo = performance.now()
   const respuesta = await predecirLote(casos)
   const ms = performance.now() - empezo

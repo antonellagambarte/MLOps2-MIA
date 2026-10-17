@@ -32,7 +32,6 @@ const modelo = ref(null)
 const resultados = ref({})
 const esperando = ref({})
 
-// Las tres probabilidades tienen que ser el mismo número: es un modelo, no tres.
 const coinciden = computed(() => {
   const listos = PROTOCOLOS
     .map((protocolo) => resultados.value[protocolo.id])
@@ -45,8 +44,6 @@ const coinciden = computed(() => {
 
 const { apiPublica } = useRuntimeConfig().public
 
-// REST y GraphQL se piden directo a la API, que para eso habilita el origen del
-// frontend por CORS. gRPC pasa por el servidor de Nuxt.
 function llamar(id, paciente) {
   if (id === "rest") return porRest(apiPublica, paciente)
   if (id === "graphql") return porGraphql(apiPublica, paciente)
@@ -101,7 +98,6 @@ async function enviarLote() {
   enviandoLote.value = true
   lote.value = null
   try {
-    // Solo los válidos: el inválido cortaría el stream a mitad de camino.
     const pacientes = PACIENTES.slice(0, 3).map((caso) => caso.datos)
     lote.value = await pedir("/api/lote", { method: "POST", body: { pacientes } })
   } finally {
@@ -119,9 +115,6 @@ const SECCIONES = [
 const seccion = ref("prediccion")
 const barraAbierta = ref(true)
 
-// Un caso por control, en el orden en que la API los aplica: el de mas afuera gana.
-// Por eso "invitado + age 150" daria 403 y no 422, y por eso la rafaga con un rol sin
-// permiso daria 403 seis veces en vez de 429: el limite depende de haber pasado el rol.
 const CASOS = [
   {
     id: "sinToken", etiqueta: "sin token", rol: null, roto: false, espera: 401,
@@ -151,14 +144,10 @@ function codigo(respuesta) {
   return respuesta.ok ? 200 : Number(String(respuesta.status).replace(/\D/g, "")) || 0
 }
 
-// El token lo emite el servidor de Nuxt porque pide la clave de servicio. Despues el
-// navegador llama a la puerta protegida por su cuenta: asi el 401, el 403, el 422 y el
-// 429 llegan como respuestas HTTP de verdad y se ven en la pestana de red.
 async function emitirToken(rol, usuario = "antonella") {
   return await $fetch("/api/token", { method: "POST", body: { rol, usuario } })
 }
 
-// Sin jwt es el caso del 401: se llama a proposito sin la cabecera.
 async function predecirSeguro(jwt, paciente) {
   const empezo = performance.now()
   try {
@@ -200,8 +189,6 @@ async function golpear() {
   esperandoSeguro.value = { ...esperandoSeguro.value, rafaga: true }
   rafaga.value = null
   try {
-    // Usuario aparte: el limite es por usuario, asi la rafaga no consume el de los otros
-    // casos. Un solo token para las seis: lo que se mide es el limite, no la emision.
     const emitido = await emitirToken("analista", "rafaga")
 
     const codigos = []
@@ -214,8 +201,6 @@ async function golpear() {
   }
 }
 
-// Con admin trae los registros; con analista tiene que dar 403. Son dos botones para
-// que el control se pueda comprobar, no solo leer en un cartel.
 async function verAuditoria(rol) {
   const emitido = await emitirToken(rol, "auditoria")
   try {
@@ -429,7 +414,7 @@ onMounted(async () => {
       </table>
     </section>
     <section v-if="seccion === 'seguridad'" class="panel ancha">
-      <h2>Seguridad · la puerta protegida</h2>
+      <h2>Seguridad · el endpoint protegido</h2>
       <p class="detalle">
         <code>POST /v1/secure/predict</code> — el mismo modelo detrás de un token con rol,
         un límite de 5 consultas por minuto y auditoría de cada predicción.
@@ -548,18 +533,15 @@ body {
   font: 16px/1.5 system-ui, sans-serif;
 }
 
-/* El encabezado y la lateral quedan fijos; el scroll vive adentro del contenido. */
 main { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
 
 .cuerpo {
   display: grid; grid-template-columns: 230px 1fr; min-height: 0;
-  /* El navegador interpola grid-template-columns, asi que el plegado no salta. */
   transition: grid-template-columns .22s ease;
 }
 .cuerpo.plegada { grid-template-columns: 3.9rem 1fr; }
 
 .contenido { overflow-y: auto; min-height: 0; padding: 1.3rem 1.5rem 4rem; }
-/* Para que en una pantalla muy ancha el contenido no se estire de punta a punta. */
 .contenido > * { max-width: 1240px; }
 
 .lateral {
@@ -571,7 +553,6 @@ main { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
 }
 .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .lateral nav { display: grid; gap: .4rem; }
-/* Mismo boton y mismo lugar este abierta o plegada: solo cambia lo que abre. */
 .tirador {
   justify-self: start; width: 2.4rem; padding: .4rem 0;
   background: transparent; border: 1px solid var(--borde);
@@ -579,8 +560,6 @@ main { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
 }
 .tirador:hover { color: var(--texto); border-color: var(--acento); }
 
-/* Plegada quedan solo los iconos: el rotulo se desvanece pero sigue en el DOM,
-   asi se puede animar y el lector de pantalla lo sigue leyendo. */
 .cuerpo.plegada .lateral { padding: 1.3rem .7rem; }
 .cuerpo.plegada .lateral nav button { padding: .6rem; }
 .cuerpo.plegada .rotulo { opacity: 0; }

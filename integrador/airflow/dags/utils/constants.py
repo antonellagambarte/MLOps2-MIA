@@ -1,4 +1,4 @@
-"""Rutas y constantes compartidas por los DAGs. Viene del TP de MLOps I."""
+"""Rutas y constantes compartidas por los DAGs"""
 S3 = "s3://"
 BUCKET = "data"
 ZONA_RAW = "data/raw/acv/"
@@ -31,6 +31,6 @@ TEST_SIZE_DEFAULT = 0.2
 TRAIN = "train"
 TEST = "test"
 
-# Grupos etarios para imputar bmi (definidos en Aprendizaje de Maquina I)
+# Grupos etarios para imputar bmi
 BINS_EDAD = [0, 25, 40, 60, 200]
 LABELS_EDAD = ["0-25", "25-40", "40-60", "60+"]

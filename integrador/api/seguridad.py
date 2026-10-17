@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-"""Puerta protegida sobre el mismo modelo, con los controles del mini-TP 7 de REST."""
+"""API REST con control de seguridad."""
 import datetime
 import hashlib
 import json
@@ -22,7 +21,7 @@ ROLES_PERMITIDOS = {"analista", "admin"}
 
 AUDITORIA = []
 
-router = APIRouter(prefix="/v1/secure", tags=["Puerta protegida"])
+router = APIRouter(prefix="/v1/secure", tags=["Endpoint protegido"])
 
 
 # --- EMISIÓN DEL TOKEN ---
@@ -60,8 +59,6 @@ def crear_token(usuario: str, rol: str, minutos: int = MINUTOS_TOKEN) -> str:
 
 @router.post("/token", response_model=TokenEmitido)
 def emitir_token(pedido: PedidoToken, _clave: str = Depends(clave_valida)):
-    # Firma cualquier rol, incluso uno sin permiso: quién puede predecir lo
-    # decide el endpoint, no el emisor. Así se puede probar el 403.
     return TokenEmitido(
         token=crear_token(pedido.usuario, pedido.rol),
         expira_en=MINUTOS_TOKEN * 60,
@@ -96,11 +93,6 @@ _golpes = {}
 
 
 def limite_de_tasa(identidad: dict = Depends(requiere_rol)):
-    """Ventana deslizante de un minuto por usuario.
-
-    En memoria porque uvicorn corre con un solo worker. Con varios, cada uno
-    tendría su propio contador; en producción iría en Redis o en el gateway.
-    """
     ahora = time.time()
     ventana = _golpes.setdefault(identidad["usuario"], [])
     ventana[:] = [t for t in ventana if ahora - t < 60]
@@ -129,8 +121,6 @@ def predecir_seguro(paciente: Caracteristicas, identidad: dict = Depends(limite_
     datos = paciente.model_dump()
     clase, probabilidad, version, descripcion = modelo.predecir(datos)
 
-    # Se guarda la huella de la consulta, no los datos del paciente: alcanza para
-    # reconocer dos consultas iguales sin almacenar información clínica.
     huella = hashlib.sha256(
         json.dumps(datos, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()

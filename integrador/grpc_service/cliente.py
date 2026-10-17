@@ -1,5 +1,4 @@
 """Cliente de prueba del servicio gRPC: unary, server-streaming y latencia contra REST.
-
 """
 import os
 import statistics
@@ -50,7 +49,7 @@ def mensaje(paciente):
 
 def medir(llamada):
     for _ in range(20):
-        llamada()  # calentar la conexion; estas no se cuentan
+        llamada()
     tiempos = []
     for _ in range(N):
         inicio = time.perf_counter()

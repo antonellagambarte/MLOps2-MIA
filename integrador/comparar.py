@@ -1,17 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Compara la latencia de REST, GraphQL y gRPC desde esta máquina.
-
-Sigue el cliente de la cátedra (clase3/Practica/gRPC_GraphQL_REST.ipynb): los
-servicios en Docker, el cliente corriendo afuera contra localhost, un bloque de N
-llamadas por protocolo y el promedio por llamada.
-
-Dos diferencias, a propósito:
-  - mide con perf_counter, que es monótono, en vez de time.time() — es el reloj que
-    usé en el mini-TP 3;
-  - descarta la primera llamada de cada bloque, que paga el arranque: la primera a
-    GraphQL arma el esquema y la primera a gRPC abre el canal HTTP/2.
-
-Uso:  python comparar.py [N]        (por defecto N=1000, como la cátedra)
+"""Compara la latencia de REST, GraphQL y gRPC desde máquina.
 """
 import json
 import os
@@ -31,14 +19,12 @@ REST_URL = "http://localhost:8800/v1/predict"
 GRAPHQL_URL = "http://localhost:8800/graphql"
 GRPC_HOST = "localhost:50051"
 
-# El de referencia: tiene que dar 0.5005481839179993 por los tres.
 PACIENTE = {
     "gender": "Female", "age": 67, "hypertension": 0, "heart_disease": 1,
     "ever_married": "Yes", "work_type": "Private", "Residence_type": "Urban",
     "avg_glucose_level": 228.69, "bmi": 36.6, "smoking_status": "formerly smoked",
 }
 
-# Strawberry nombra los campos en camelCase.
 CAMPOS_GRAPHQL = {
     "heart_disease": "heartDisease", "ever_married": "everMarried",
     "work_type": "workType", "Residence_type": "residenceType",
@@ -50,7 +36,6 @@ MUTACION = """mutation($paciente: PacienteInput!) {
 
 
 def stubs():
-    """Genera los stubs del .proto en una carpeta temporal, como pide la cátedra."""
     destino = tempfile.mkdtemp(prefix="stubs_")
     subprocess.run(
         [sys.executable, "-m", "grpc_tools.protoc",
@@ -64,7 +49,7 @@ def stubs():
 
 def medir(nombre, una_llamada, vueltas):
     """Un bloque de N llamadas y el promedio por llamada, en milisegundos."""
-    una_llamada()  # calentamiento: queda afuera del cronómetro
+    una_llamada()
 
     empezo = time.perf_counter()
     for _ in range(vueltas):
@@ -114,7 +99,6 @@ def main():
     finally:
         canal.close()
 
-    # La prueba de que es el mismo modelo por los tres caminos.
     probabilidades = {r["probabilidad"] for r in resultado.values()}
     print("\n  los tres devolvieron %s" % ("el mismo número" if len(probabilidades) == 1
                                            else "números DISTINTOS: %s" % probabilidades))
