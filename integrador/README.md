@@ -9,6 +9,8 @@ Nivel de la entrega: **contenedores**. La plataforma corre entera sobre Docker, 
 solo comando y no necesita nada instalado en la máquina más que Docker. Lo único que corre
 afuera es la medición de latencia (`comparar.py`), que necesita Python.
 
+La presentación del trabajo está en [`presentacion.pdf`](presentacion.pdf).
+
 ## Autora
 
 Antonella Gambarte
@@ -287,6 +289,7 @@ integrador/
 ├── docker-compose.yaml        los servicios, la red y los volúmenes
 ├── .env                       credenciales y puertos de desarrollo
 ├── comparar.py                latencia de REST, GraphQL y gRPC desde la máquina
+├── presentacion.pdf           la presentación del trabajo
 ├── dataset/                   el CSV crudo, versionado
 ├── airflow/dags/
 │   ├── etl_acv.py             6 tareas: del CSV crudo a curated/
